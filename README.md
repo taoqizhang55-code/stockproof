@@ -28,7 +28,7 @@ stockproof demo
 | **Announcements** | dashboard | A-share and HK filings are classified by importance (insider selling, regulator letters, buybacks, big contracts and more), and the important ones are summarized. |
 | **Why did it move?** | dashboard | For an unusual move, the LLM explains it using only the news, filings and reports published around that day, cites each one, and says so when nothing explains the move. |
 | **What changed?** | dashboard | The latest two reports compared: results, outlook, new risks, business and payouts. |
-| **Daily digest · calendar · schedule** | `daily`, `calendar`, `schedule` | A daily summary of your watchlist, upcoming reports, and an automatic run every evening on macOS. |
+| **Daily digest · calendar · schedule** | `daily`, `calendar`, `schedule` | A daily summary of your watchlist, upcoming reports, and an automatic run every evening (macOS, Windows, Linux), with a desktop notification. |
 
 **Screen and scorecards**
 
@@ -125,7 +125,7 @@ stockproof scorecard 600519 NVDA             # …or for any stocks
 stockproof research --market cn --open       # earnings event study + backtest (us / cn)
 stockproof policy                            # 新闻联播 policy study (first run: a few hours of downloads)
 stockproof daily                             # one refresh of the watchlist + daily digest
-stockproof schedule --time 21:00             # run `daily` every evening (macOS)
+stockproof schedule --time 21:00             # run `daily` every evening (macOS, Windows, Linux)
 stockproof calendar                          # who reports in the next two weeks
 stockproof mcp --install-dsh                 # add to DeepSeek Harness on this computer (desktop app too)
 stockproof lab caps                          # quant lab: what can be tested here

@@ -45,7 +45,7 @@ def test_make_demo_and_run(tmp_path, monkeypatch):
     src = _source(tmp_path)
     out = tmp_path / "bundle"
     _make_demo_module().main(["--data-dir", str(src), "--tickers", "AAPL", "000898", "--out", str(out)])
-    meta = json.loads((out / "demo.json").read_text())
+    meta = json.loads((out / "demo.json").read_text(encoding="utf-8"))
     assert meta["watchlist"] == ["AAPL", "000898.SZ"]
     assert (out / "quotes" / "AAPL.csv").exists() and (out / "policy" / "results.json").exists()
     # only the chosen stocks' rows are copied
@@ -53,9 +53,9 @@ def test_make_demo_and_run(tmp_path, monkeypatch):
     con = sqlite3.connect(out / "stockproof.db")
     assert [r[0] for r in con.execute("SELECT ticker FROM headlines")] == ["AAPL"]
     assert con.execute("SELECT COUNT(*) FROM scores").fetchone()[0] == 1
-    cards = json.loads(next((out / "screens").glob("scorecards_*.json")).read_text())
+    cards = json.loads(next((out / "screens").glob("scorecards_*.json")).read_text(encoding="utf-8"))
     assert [c["ticker"] for c in cards] == ["301308.SZ"]          # screen's list kept, unrelated cards dropped
-    screen = json.loads(next((out / "screens").glob("cn_2*.json")).read_text())
+    screen = json.loads(next((out / "screens").glob("cn_2*.json")).read_text(encoding="utf-8"))
     assert set(screen["all"]) == {"301308.SZ"}
 
     from stockproof import demo
@@ -73,6 +73,6 @@ def test_make_demo_and_run(tmp_path, monkeypatch):
         assert app.compare_reports("AAPL", "zh") == {"error": "demo"}
         # the bundle itself is untouched by edits in the running demo
         app.set_watchlist(["AAPL"])
-        assert json.loads((out / "dashboard.json").read_text())["watchlist"] == ["AAPL", "000898.SZ"]
+        assert json.loads((out / "dashboard.json").read_text(encoding="utf-8"))["watchlist"] == ["AAPL", "000898.SZ"]
     finally:
         os.environ.pop("STOCKPROOF_TODAY", None)

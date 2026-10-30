@@ -1,8 +1,9 @@
 """
-Run the daily refresh automatically (macOS launchd), so news history builds up without you.
+Run the daily refresh automatically, so news history builds up without you:
+macOS launchd, Windows Task Scheduler, or cron on Linux.
 
   stockproof daily                      one refresh now: news + earnings for the dashboard watchlist
-  stockproof schedule --time 21:00      install a daily job (macOS); --remove, --status, --run-now
+  stockproof schedule --time 21:00      install a daily job; --remove, --status, --run-now
 
 The job runs the same Python that installed it, in this project folder. API keys are not copied
 anywhere: with --load-shell-env the job asks your login shell for them at run time (they stay in
@@ -30,8 +31,17 @@ def plist_path() -> str:
     return os.path.expanduser(f"~/Library/LaunchAgents/{LABEL}.plist")
 
 
+TASK = "stockproof-daily"                     # Windows Task Scheduler name
+CRON_MARK = "# stockproof daily"               # marks our crontab line
+
+
 def log_path() -> str:
-    return os.path.expanduser("~/Library/Logs/stockproof/daily.log")
+    if sys.platform == "win32":
+        base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
+        return os.path.join(base, "stockproof", "daily.log")
+    if sys.platform == "darwin":
+        return os.path.expanduser("~/Library/Logs/stockproof/daily.log")
+    return os.path.expanduser("~/.local/state/stockproof/daily.log")
 
 
 def last_run_path(data_dir: str) -> str:
@@ -41,7 +51,7 @@ def last_run_path(data_dir: str) -> str:
 def load_shell_env(names=KEY_ENVS) -> list[str]:
     """Copy API keys / SEC contact from the user's interactive shell into this process only."""
     missing = [n for n in names if not os.environ.get(n)]
-    if not missing:
+    if not missing or sys.platform == "win32":     # Windows: user variables reach every program already
         return []
     shell = os.environ.get("SHELL") or "/bin/zsh"
     try:
@@ -72,12 +82,97 @@ def build_plist(python: str, workdir: str, hour: int, minute: int, args: list[st
     }
 
 
+# ---------------------------------------------------------------- Windows: Task Scheduler
+def _q(x: str) -> str:
+    return '"' + x.replace('"', '') + '"'
+
+
+def build_win_cmd(python: str, workdir: str, args: list[str], log: str) -> str:
+    """The batch file the scheduled task runs (UTF-8 console, project folder, output to the log)."""
+    return ("@echo off\r\nchcp 65001 >nul\r\nset PYTHONUTF8=1\r\n"
+            f"cd /d {_q(workdir)}\r\n"
+            f"{_q(python)} -m stockproof daily {' '.join(_q(a) for a in args)} >> {_q(log)} 2>&1\r\n")
+
+
+def build_win_xml(command: str, hour: int, minute: int) -> str:
+    """Task definition: daily at HH:MM, and as soon as possible after a missed start (computer off/asleep)."""
+    from xml.sax.saxutils import escape
+    start = f"{dt.date.today().isoformat()}T{hour:02d}:{minute:02d}:00"
+    return f"""<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo><Description>stockproof daily refresh</Description></RegistrationInfo>
+  <Triggers><CalendarTrigger><StartBoundary>{start}</StartBoundary><Enabled>true</Enabled>
+    <ScheduleByDay><DaysInterval>1</DaysInterval></ScheduleByDay></CalendarTrigger></Triggers>
+  <Principals><Principal id="Author"><LogonType>InteractiveToken</LogonType><RunLevel>LeastPrivilege</RunLevel></Principal></Principals>
+  <Settings><StartWhenAvailable>true</StartWhenAvailable><DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries><ExecutionTimeLimit>PT2H</ExecutionTimeLimit>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy><Enabled>true</Enabled></Settings>
+  <Actions Context="Author"><Exec><Command>{escape(command)}</Command></Exec></Actions>
+</Task>
+"""
+
+
+def _install_windows(h: int, m: int, data_dir: str, extra: list[str]) -> str:
+    import tempfile
+    os.makedirs(os.path.dirname(log_path()), exist_ok=True)
+    runner = os.path.join(os.path.dirname(log_path()), "daily.cmd")
+    with open(runner, "w", encoding="utf-8", newline="") as f:
+        f.write(build_win_cmd(sys.executable, os.getcwd(), ["--data-dir", os.path.abspath(data_dir), *extra], log_path()))
+    xml = os.path.join(tempfile.gettempdir(), "stockproof-task.xml")
+    with open(xml, "w", encoding="utf-16") as f:
+        f.write(build_win_xml(runner, h, m))
+    r = subprocess.run(["schtasks", "/Create", "/TN", TASK, "/XML", xml, "/F"], capture_output=True, text=True)
+    if r.returncode != 0:
+        return f"Could not create the scheduled task: {(r.stderr or r.stdout).strip()}"
+    return (f"Daily refresh scheduled at {h:02d}:{m:02d} in Windows Task Scheduler (task “{TASK}”;\n"
+            f"runs as soon as possible if the computer was off or asleep).\n  log: {log_path()}\n"
+            f"Test it now with:  python -m stockproof schedule --run-now")
+
+
+# ---------------------------------------------------------------- Linux: cron
+def cron_line(python: str, workdir: str, hour: int, minute: int, args: list[str], log: str) -> str:
+    import shlex
+    cmd = " ".join(shlex.quote(a) for a in [python, "-m", "stockproof", "daily", "--load-shell-env", *args])
+    return f"{minute} {hour} * * * cd {shlex.quote(workdir)} && {cmd} >> {shlex.quote(log)} 2>&1 {CRON_MARK}"
+
+
+def merge_crontab(existing: str, line: str | None) -> str:
+    """Replace our line in a crontab (or remove it when line is None); other lines are kept."""
+    keep = [x for x in existing.splitlines() if CRON_MARK not in x]
+    if line:
+        keep.append(line)
+    return ("\n".join(keep) + "\n") if keep else ""
+
+
+def _crontab() -> str:
+    r = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
+    return r.stdout if r.returncode == 0 else ""
+
+
+def _write_crontab(text: str) -> subprocess.CompletedProcess:
+    return subprocess.run(["crontab", "-"], input=text, capture_output=True, text=True)
+
+
+def _install_linux(h: int, m: int, data_dir: str, extra: list[str]) -> str:
+    import shutil
+    if not shutil.which("crontab"):
+        return "cron is not installed (no `crontab` command). Install cron, or run `stockproof daily` yourself."
+    os.makedirs(os.path.dirname(log_path()), exist_ok=True)
+    line = cron_line(sys.executable, os.getcwd(), h, m, ["--data-dir", os.path.abspath(data_dir), *extra], log_path())
+    r = _write_crontab(merge_crontab(_crontab(), line))
+    if r.returncode != 0:
+        return f"Could not update the crontab: {r.stderr.strip()}"
+    return (f"Daily refresh scheduled at {h:02d}:{m:02d} with cron (skipped if the computer is off then).\n"
+            f"  log: {log_path()}\nSee it with `crontab -l`.")
+
+
+# ---------------------------------------------------------------- all platforms
 def install(time_hhmm: str, data_dir: str, extra: list[str]) -> str:
-    if sys.platform != "darwin":
-        h, m = time_hhmm.split(":")
-        return ("Automatic scheduling is built in for macOS only. On Linux, add this line with `crontab -e`:\n"
-                f"  {m} {h} * * * cd {os.getcwd()} && {sys.executable} -m stockproof daily --data-dir {data_dir}")
     h, m = (int(x) for x in time_hhmm.split(":"))
+    if sys.platform == "win32":
+        return _install_windows(h, m, data_dir, extra)
+    if sys.platform != "darwin":
+        return _install_linux(h, m, data_dir, extra)
     plist = build_plist(sys.executable, os.getcwd(), h, m, ["--data-dir", data_dir, *extra])
     path = plist_path()
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -94,7 +189,7 @@ def install(time_hhmm: str, data_dir: str, extra: list[str]) -> str:
 
 
 def remove_old() -> bool:
-    """Remove the daily job installed under the old name (marketmood), if any."""
+    """Remove the daily job installed under the old name (marketmood), if any (macOS)."""
     old = os.path.expanduser(f"~/Library/LaunchAgents/{OLD_LABEL}.plist")
     if not os.path.exists(old):
         return False
@@ -104,6 +199,15 @@ def remove_old() -> bool:
 
 
 def remove() -> str:
+    if sys.platform == "win32":
+        r = subprocess.run(["schtasks", "/Delete", "/TN", TASK, "/F"], capture_output=True, text=True)
+        return "Daily job removed." if r.returncode == 0 else "No daily job installed."
+    if sys.platform != "darwin":
+        cur = _crontab()
+        if CRON_MARK not in cur:
+            return "No daily job installed."
+        _write_crontab(merge_crontab(cur, None))
+        return "Daily job removed."
     remove_old()
     path = plist_path()
     if not os.path.exists(path):
@@ -113,16 +217,27 @@ def remove() -> str:
     return "Daily job removed."
 
 
-def status(data_dir: str) -> str:
-    lines = []
+def _installed() -> str | None:
+    if sys.platform == "win32":
+        r = subprocess.run(["schtasks", "/Query", "/TN", TASK, "/FO", "LIST"], capture_output=True, text=True)
+        return f"Installed: Windows task “{TASK}”" if r.returncode == 0 else None
+    if sys.platform != "darwin":
+        line = next((x for x in _crontab().splitlines() if CRON_MARK in x), None)
+        if not line:
+            return None
+        mi, hr = line.split()[:2]
+        return f"Installed: daily at {int(hr):02d}:{int(mi):02d} (crontab)"
     path = plist_path()
-    if os.path.exists(path):
-        with open(path, "rb") as f:
-            p = plistlib.load(f)
-        t = p.get("StartCalendarInterval", {})
-        lines.append(f"Installed: daily at {t.get('Hour', 0):02d}:{t.get('Minute', 0):02d} ({path})")
-    else:
-        lines.append("Not installed.")
+    if not os.path.exists(path):
+        return None
+    with open(path, "rb") as f:
+        p = plistlib.load(f)
+    t = p.get("StartCalendarInterval", {})
+    return f"Installed: daily at {t.get('Hour', 0):02d}:{t.get('Minute', 0):02d} ({path})"
+
+
+def status(data_dir: str) -> str:
+    lines = [_installed() or "Not installed."]
     last = read_last(data_dir)
     if last:
         lines.append(f"Last run: {last.get('finished')} — {last.get('summary')}")
@@ -134,8 +249,18 @@ def status(data_dir: str) -> str:
 
 
 def run_now() -> str:
+    if sys.platform == "win32":
+        r = subprocess.run(["schtasks", "/Run", "/TN", TASK], capture_output=True, text=True)
+        if r.returncode != 0:
+            return f"Could not start the job ({(r.stderr or r.stdout).strip()}). Is it installed?"
+        return f"Started in the background. The log is {log_path()}"
     if sys.platform != "darwin":
-        return "Only on macOS. Run `python -m stockproof daily` instead."
+        line = next((x for x in _crontab().splitlines() if CRON_MARK in x), None)
+        if not line:
+            return "No daily job installed."
+        cmd = line.split(None, 5)[5].replace(CRON_MARK, "")
+        subprocess.Popen(cmd, shell=True, start_new_session=True)
+        return f"Started in the background. Follow it with:\n  tail -f {log_path()}"
     r = subprocess.run(["launchctl", "kickstart", "-k", f"gui/{os.getuid()}/{LABEL}"], capture_output=True, text=True)
     if r.returncode != 0:
         return f"Could not start the job ({r.stderr.strip() or r.returncode}). Is it installed?"

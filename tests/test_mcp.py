@@ -75,16 +75,16 @@ def test_install_dsh_merges_and_uninstalls(tmp_path):
     data = tmp_path / "proj" / "stockproof_data"
     r = mcp_server.install_dsh(str(data), home=str(home), python="/opt/py/bin/python3")
     assert r["ok"] and r["created_home"] and r["backup"] is None
-    text = (home / "cordis.patch.yml").read_text()
+    text = (home / "cordis.patch.yml").read_text(encoding="utf-8")
     assert "'/opt/py/bin/python3'" in text and "--load-shell-env" in text and str(data) in text
     # someone else's entries are kept; running again updates instead of duplicating; a backup is made
     (home / "cordis.patch.yml").write_text("- replace:\n    id: other\n" + text)
     r = mcp_server.install_dsh(str(data), home=str(home), python="/new/python")
-    text = (home / "cordis.patch.yml").read_text()
+    text = (home / "cordis.patch.yml").read_text(encoding="utf-8")
     assert r["updated"] and r["backup"] and text.count("stockproof-mcp") == 1
     assert "id: other" in text and "/new/python" in text and "/opt/py" not in text
     r = mcp_server.uninstall_dsh(home=str(home))
-    text = (home / "cordis.patch.yml").read_text()
+    text = (home / "cordis.patch.yml").read_text(encoding="utf-8")
     assert r["removed"] and "stockproof" not in text and "id: other" in text
     # refuses to touch a file it doesn't understand
     (home / "cordis.patch.yml").write_text("foo: bar\n")
@@ -176,7 +176,7 @@ def test_install_writes_skills_and_uninstall_removes_only_ours(tmp_path):
     assert txt.startswith("---\nname: stockproof-checkup\n") and "portfolio_checkup" in txt
     mcp_server.uninstall_dsh(home=str(home))
     assert not (home / "skills" / "stockproof-checkup").exists()
-    assert (home / "skills" / "stockproof-menu" / "SKILL.md").read_text() == "mine" and (home / "skills" / "other").exists()
+    assert (home / "skills" / "stockproof-menu" / "SKILL.md").read_text(encoding="utf-8") == "mine" and (home / "skills" / "other").exists()
 
 
 def test_welcome_suggests_dashboard_without_opening(tmp_path, monkeypatch):

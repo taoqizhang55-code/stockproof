@@ -178,12 +178,32 @@ def build(app, lang: str, client=None, model_id: str | None = None) -> dict:
 
 
 def notify(title: str, message: str) -> None:
-    """macOS notification (silently skipped elsewhere)."""
-    if sys.platform != "darwin":
-        return
-    esc = lambda s: s.replace("\\", "\\\\").replace('"', '\\"')
-    subprocess.run(["osascript", "-e", f'display notification "{esc(message)}" with title "{esc(title)}"'],
-                   capture_output=True, timeout=10)
+    """A desktop notification: macOS, Windows 10/11 or Linux (notify-send). Best effort, never raises."""
+    try:
+        if sys.platform == "darwin":
+            esc = lambda s: s.replace("\\", "\\\\").replace('"', '\\"')
+            subprocess.run(["osascript", "-e", f'display notification "{esc(message)}" with title "{esc(title)}"'],
+                           capture_output=True, timeout=10)
+        elif sys.platform == "win32":
+            ps = (
+                "[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] > $null;"
+                "$x = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent("
+                "[Windows.UI.Notifications.ToastTemplateType]::ToastText02);"
+                "$t = $x.GetElementsByTagName('text');"
+                "$t.Item(0).AppendChild($x.CreateTextNode($env:SP_TITLE)) > $null;"
+                "$t.Item(1).AppendChild($x.CreateTextNode($env:SP_MSG)) > $null;"
+                "$app = '{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\powershell.exe';"
+                "[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier($app).Show("
+                "[Windows.UI.Notifications.ToastNotification]::new($x))")
+            env = dict(os.environ, SP_TITLE=title, SP_MSG=message)       # text passed safely, not pasted into code
+            subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps], env=env,
+                           capture_output=True, timeout=20)
+        else:
+            import shutil
+            if shutil.which("notify-send"):
+                subprocess.run(["notify-send", title, message], capture_output=True, timeout=10)
+    except Exception:
+        pass
 
 
 def list_dates(data_dir: str) -> list[str]:

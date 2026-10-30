@@ -25,7 +25,7 @@ stockproof demo
 | **公告监控** | 网页看板 | 按重要程度给 A 股、港股公告分类，比如减持、问询函、回购、中标、重组等；重要公告由 AI 写摘要。 |
 | **为什么涨跌？** | 网页看板 | 遇到异动时，只用当天前后的新闻、公告、财报来解释，逐条注明出处；找不到原因就直接说找不到。 |
 | **财报对比** | 网页看板 | 最新两期财报相比，业绩、展望、风险、业务、分红有哪些变化。 |
-| **每日简报、财报日历、定时运行** | `daily` / `calendar` / `schedule` | 每天汇总关注列表、提醒即将发布的财报、每晚自动更新（macOS）。 |
+| **每日简报、财报日历、定时运行** | `daily` / `calendar` / `schedule` | 每天汇总关注列表、提醒即将发布的财报、每晚自动更新并弹出通知（Mac、Windows、Linux 都支持）。 |
 
 **选股与评分卡**
 
@@ -112,7 +112,7 @@ stockproof scorecard                         # 给选股名单前 10 名生成�
 stockproof scorecard 600519 000898           # 也可以指定任意股票
 stockproof research --market cn --open       # A 股财报事件研究和回测
 stockproof policy                            # 新闻联播政策研究（第一次需要下载几个小时）
-stockproof schedule --time 21:00             # 每晚自动更新（macOS）
+stockproof schedule --time 21:00             # 每晚自动更新（Mac、Windows、Linux 都支持）
 stockproof mcp --install-dsh                 # 一条命令装进 DeepSeek Harness（含桌面版，任何电脑）
 stockproof lab caps                          # 量化实验室：能检验哪些想法
 stockproof lab confirm <id>                  # 在锁定的近两年数据上检验一次

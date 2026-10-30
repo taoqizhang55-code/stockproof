@@ -9,7 +9,7 @@ Command line interface.
   stockproof dashboard --watchlist watchlist_research.txt
   stockproof research --market cn --lang zh --open
   stockproof daily                       # one refresh of the dashboard watchlist
-  stockproof schedule --time 21:00       # ... every day at 21:00 (macOS)
+  stockproof schedule --time 21:00       # ... every day at 21:00 (macOS, Windows, Linux)
   stockproof calendar                    # who reports earnings in the next 14 days
   stockproof mcp                         # MCP server for AI agents (DeepSeek Harness, Claude...)
   stockproof providers
@@ -946,7 +946,7 @@ def build_parser() -> argparse.ArgumentParser:
     day.add_argument("--data-dir", default=DATA_DIR)
     day.set_defaults(func=cmd_daily)
 
-    sch = sub.add_parser("schedule", help="run `daily` automatically every day (macOS)")
+    sch = sub.add_parser("schedule", help="run `daily` automatically every day (macOS launchd, Windows Task Scheduler, Linux cron)")
     sch.add_argument("--time", help="install the daily job at HH:MM (your computer's time)")
     sch.add_argument("--remove", action="store_true", help="remove the daily job")
     sch.add_argument("--run-now", action="store_true", help="start the installed job once, now")
@@ -1055,7 +1055,7 @@ MENU = {
                     ("earnings AAPL 600519", "财报解读 + 业绩惊喜 SUE"),
                     ("daily", "更新关注列表并生成每日简报"),
                     ("calendar", "未来两周谁发财报"),
-                    ("schedule --time 21:00", "每晚自动更新（macOS）")]),
+                    ("schedule --time 21:00", "每晚自动更新（Mac / Windows / Linux）")]),
         ("选股与评分卡", [("screen", "全市场 A 股选股名单和理由"),
                       ("scorecard 600519", "证据评分卡：每个维度附出处和检验记录")]),
         ("研究与量化实验室", [("research --market cn", "财报事件研究和扣费回测"),
@@ -1073,7 +1073,7 @@ MENU = {
                             ("earnings AAPL 600519", "earnings read by the LLM, with SUE"),
                             ("daily", "refresh the watchlist and write the daily digest"),
                             ("calendar", "who reports in the next two weeks"),
-                            ("schedule --time 21:00", "run daily every evening (macOS)")]),
+                            ("schedule --time 21:00", "run daily every evening (macOS / Windows / Linux)")]),
         ("Screen and scorecards", [("screen", "whole-market A-share shortlist with reasons"),
                                    ("scorecard 600519", "evidence scorecard with sources and track record")]),
         ("Research and the quant lab", [("research --market cn", "earnings event study and backtest"),
