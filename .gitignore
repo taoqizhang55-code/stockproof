@@ -1,0 +1,34 @@
+# Secrets: never commit API keys
+.env
+*.key
+
+# Local data and generated output (your database, downloads, reports)
+marketmood_data/
+marketmood_report*.html
+marketmood_earnings*.html
+marketmood_research*.html
+*.csv
+*.db
+
+# Probe results contain paths from your own computer
+tools/*_result.txt
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+
+# macOS
+.DS_Store
+
+# Generated DSH config with paths from your own computer
+marketmood.cordis.yml
+
+# ...except the bundled demo data (`marketmood demo`)
+!marketmood/demo_data/*.db
+!marketmood/demo_data/**/*.csv

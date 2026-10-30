@@ -1,0 +1,9 @@
+# One ticker per line. Optional company name after a comma or "=".
+# Names help the AI tell companies apart and help search for short tickers.
+AAPL
+MSFT
+NVDA
+MRK, Merck & Co.
+INTC
+COST
+T=AT&T

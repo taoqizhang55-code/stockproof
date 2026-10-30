@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "marketmood"
+version = "0.2.0"
+description = "An LLM reads stock news, earnings and announcements (US, China A-shares, HK) with cited sources; a research toolkit tests every signal against history."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+keywords = ["stocks", "llm", "sentiment", "earnings", "a-shares", "deepseek", "event-study", "mcp"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Topic :: Office/Business :: Financial :: Investment",
+    "Natural Language :: Chinese (Simplified)",
+    "Natural Language :: English",
+]
+dependencies = [
+    "requests>=2.25",
+    "pandas>=1.3",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+# China markets (A-shares, Hong Kong). AKShare needs Python 3.11+
+cn = ["akshare; python_version >= \"3.11\""]
+# price download for `marketmood research --download`
+research = ["yfinance"]
+# `marketmood mcp`: tools for AI agents (MCP needs Python 3.10+)
+mcp = ["mcp; python_version >= \"3.10\""]
+
+[project.urls]
+Homepage = "https://github.com/taoqizhang55-code/marketmood"
+Issues = "https://github.com/taoqizhang55-code/marketmood/issues"
+
+[project.scripts]
+marketmood = "marketmood.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["marketmood*"]
+
+[tool.setuptools.package-data]
+marketmood = ["demo_data/*", "demo_data/**/*"]

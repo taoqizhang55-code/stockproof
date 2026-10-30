@@ -1,0 +1,19 @@
+# marketmood MCP server for DeepSeek Harness.
+# Needs marketmood installed for a Python 3.10+:  pip install "marketmood[mcp,cn]"
+# Set before starting dsh (e.g. in ~/.zshrc):
+#   MARKETMOOD_PYTHON  the python that has marketmood installed (default: python3)
+#   MARKETMOOD_HOME    the folder with your marketmood_data (default: where dsh was started)
+#   DEEPSEEK_API_KEY   used by the tools that read reports (DSH hides *KEY* variables from servers,
+#                      so it is passed on explicitly below)
+- insert:
+    - id: marketmood-mcp
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: marketmood
+        transport: stdio
+        command: !!js process.env.MARKETMOOD_PYTHON ?? 'python3'
+        args: ['-m', 'marketmood', 'mcp']
+        cwd: !!js process.env.MARKETMOOD_HOME ?? process.cwd()
+        env:
+          DEEPSEEK_API_KEY: !!js process.env.DEEPSEEK_API_KEY ?? ''
+          MARKETMOOD_SEC_CONTACT: !!js process.env.MARKETMOOD_SEC_CONTACT ?? ''

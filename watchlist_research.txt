@@ -1,0 +1,63 @@
+# The 60 stocks used in the research (quant_system experiments 4-6).
+# Daily: marketmood scan --watchlist watchlist_research.txt
+
+AAPL, Apple
+MSFT, Microsoft
+GOOGL, Alphabet Google
+AMZN, Amazon
+META, Meta Platforms
+NVDA, Nvidia
+INTC, Intel
+CSCO, Cisco
+ORCL, Oracle
+IBM, IBM
+ADBE, Adobe
+QCOM, Qualcomm
+TXN, Texas Instruments
+JPM, JPMorgan Chase
+BAC, Bank of America
+WFC, Wells Fargo
+GS, Goldman Sachs
+C, Citigroup
+MS, Morgan Stanley
+AXP, American Express
+USB, U.S. Bancorp
+KO, Coca-Cola
+PEP, PepsiCo
+PG, Procter & Gamble
+WMT, Walmart
+COST, Costco
+MCD, McDonald's
+NKE, Nike
+SBUX, Starbucks
+TGT, Target Corporation
+HD, Home Depot
+DIS, Walt Disney
+JNJ, Johnson & Johnson
+PFE, Pfizer
+MRK, Merck
+ABBV, AbbVie
+BMY, Bristol Myers Squibb
+UNH, UnitedHealth
+CVS, CVS Health
+AMGN, Amgen
+GILD, Gilead Sciences
+XOM, Exxon Mobil
+CVX, Chevron
+COP, ConocoPhillips
+SLB, Schlumberger SLB
+OXY, Occidental Petroleum
+BA, Boeing
+CAT, Caterpillar
+GE, GE Aerospace
+MMM, 3M
+HON, Honeywell
+UPS, UPS United Parcel Service
+LMT, Lockheed Martin
+T, AT&T
+VZ, Verizon
+DUK, Duke Energy
+SO, Southern Company
+NEE, NextEra Energy
+APD, Air Products
+NEM, Newmont
