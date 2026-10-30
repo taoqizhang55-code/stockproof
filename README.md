@@ -63,7 +63,13 @@ question into a spec, the lab runs it on ten years of point-in-time A-share data
 The answer was **no**: −3.6% a year (t = −2.0), positive in 3 of 4 years before 2020 and negative every year from 2020 to 2024. Ask for a variant
 and the agent reports that the significance bar went up with the number of tries.
 
+![DeepSeek Harness runs a backtest with marketmood](docs/images/dsh_lab.png)
+
 <p align="center"><img src="docs/images/lab_report.png" width="48%" alt="Quant lab report"> <img src="docs/images/portfolio.png" width="48%" alt="Portfolio check-up"></p>
+
+In DeepSeek Harness, type `/marketmood` for ten ready-made requests:
+
+<p align="center"><img src="docs/images/dsh_skills.png" width="80%" alt="marketmood skills in the DeepSeek Harness / menu"></p>
 
 ## What the research found
 

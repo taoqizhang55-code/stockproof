@@ -57,7 +57,13 @@ marketmood demo
 DeepSeek 把问题翻译成策略，实验室用十年 A 股数据现场回测，浏览器自动弹出报告。结论是**不能**：每年 −3.6%（t = −2.0），
 2020 年前 4 年里有 3 年为正，2020–2024 年每年都是负的。再让它换个条件试，它会提醒你"已经试了 2 个版本，显著性门槛提高到 2.24"。
 
+![在 DeepSeek Harness 里用 marketmood 现场回测](docs/images/dsh_lab.png)
+
 <p align="center"><img src="docs/images/lab_report.png" width="48%" alt="量化实验室报告"> <img src="docs/images/portfolio.png" width="48%" alt="持仓体检"></p>
+
+在 DeepSeek Harness 里输入 `/marketmood`，可以选 10 个现成的问题：
+
+<p align="center"><img src="docs/images/dsh_skills.png" width="80%" alt="DeepSeek Harness 里的 marketmood 技能"></p>
 
 ## 研究发现
 
