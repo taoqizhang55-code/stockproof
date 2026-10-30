@@ -191,7 +191,7 @@ disclosure date.
 ## Development
 
 ```bash
-pip install -e ".[dev]"
+pip install -e ".[dev,mcp]"
 pytest              # ~170 offline tests: fake feeds, fake LLM, fake AKShare; no key or network needed
 python tools/make_demo.py   # rebuild the demo bundle from your own marketmood_data
 ```
