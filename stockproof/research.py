@@ -485,7 +485,15 @@ def saved_meta(data_dir: str, market: str) -> dict | None:
     if not os.path.exists(p):
         return None
     with open(p, encoding="utf-8") as f:
-        return json.load(f)
+        meta = json.load(f)
+    pp = meta.get("prices_path")
+    if pp and not os.path.exists(pp):
+        # saved before the data folder was renamed (marketmood_data → stockproof_data) or moved:
+        # look for the same file name inside the current data folder
+        alt = os.path.join(data_dir, os.path.basename(pp))
+        if os.path.exists(alt):
+            meta["prices_path"] = alt
+    return meta
 
 
 def _read_csv(path: str) -> pd.DataFrame:

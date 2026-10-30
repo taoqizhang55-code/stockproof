@@ -33,3 +33,13 @@ def test_install_replaces_old_dsh_entry_and_skills(tmp_path):
     assert r["ok"] and r["updated"] and "marketmood" not in text and "id: stockproof-mcp" in text and "id: other" in text
     assert not (home / "skills" / "marketmood-menu").exists() and (home / "skills" / "marketmood-mine").exists()
     assert (home / "skills" / "stockproof-checkup" / "SKILL.md").exists()
+
+
+def test_prices_path_saved_under_old_folder_is_found(tmp_path):
+    import json
+    from stockproof import research
+    d = tmp_path / "stockproof_data"
+    (d / "research").mkdir(parents=True)
+    (d / "prices_cn.csv").write_text("date\n")
+    (d / "research" / "cn_meta.json").write_text(json.dumps({"prices_path": "marketmood_data/prices_cn.csv"}))
+    assert research.saved_meta(str(d), "cn")["prices_path"] == str(d / "prices_cn.csv")
