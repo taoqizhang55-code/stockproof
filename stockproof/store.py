@@ -61,7 +61,10 @@ class Store:
         self.path = os.path.join(data_dir, "stockproof.db")
         old = os.path.join(data_dir, "marketmood.db")           # name before 0.3
         if not os.path.exists(self.path) and os.path.exists(old):
-            os.replace(old, self.path)
+            try:
+                os.replace(old, self.path)
+            except OSError:                                   # in use by another program (Windows): keep using it
+                self.path = old
         self.conn = sqlite3.connect(self.path)
         self.conn.executescript(SCHEMA)
         cols = {r[1] for r in self.conn.execute("PRAGMA table_info(scores)")}

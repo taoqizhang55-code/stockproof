@@ -153,7 +153,7 @@ class Base(unittest.TestCase):
     def tearDown(self):
         self.req.stop()
         self.ak.stop()
-        shutil.rmtree(self.dir)
+        shutil.rmtree(self.dir, ignore_errors=True)  # Windows keeps open SQLite files locked
 
 
 # ---------------------------------------------------------------- tests

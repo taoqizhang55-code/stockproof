@@ -1108,6 +1108,11 @@ def menu_text(lang: str = "en") -> str:
 
 
 def main(argv=None) -> None:
+    for stream in (sys.stdout, sys.stderr):        # never crash on a character the console can't show (Windows)
+        try:
+            stream.reconfigure(errors="replace")
+        except (AttributeError, ValueError):
+            pass
     parser = build_parser()
     args = parser.parse_args(argv)
     if not getattr(args, "func", None):

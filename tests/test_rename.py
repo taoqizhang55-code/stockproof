@@ -14,7 +14,10 @@ def test_old_env_names_still_work(monkeypatch):
 
 
 def test_old_database_is_taken_over(tmp_path):
-    sqlite3.connect(tmp_path / "marketmood.db").execute("CREATE TABLE t (x)")
+    con = sqlite3.connect(tmp_path / "marketmood.db")
+    con.execute("CREATE TABLE t (x)")
+    con.commit()
+    con.close()
     s = Store(str(tmp_path))
     assert s.path.endswith("stockproof.db") and not (tmp_path / "marketmood.db").exists()
     assert "t" in {r[0] for r in s.conn.execute("SELECT name FROM sqlite_master")}
@@ -43,3 +46,13 @@ def test_prices_path_saved_under_old_folder_is_found(tmp_path):
     (d / "prices_cn.csv").write_text("date\n")
     (d / "research" / "cn_meta.json").write_text(json.dumps({"prices_path": "marketmood_data/prices_cn.csv"}))
     assert research.saved_meta(str(d), "cn")["prices_path"] == str(d / "prices_cn.csv")
+
+
+def test_old_database_in_use_is_used_in_place(tmp_path, monkeypatch):
+    sqlite3.connect(tmp_path / "marketmood.db").execute("CREATE TABLE t (x)")
+
+    def locked(a, b):
+        raise PermissionError("in use")              # what Windows does while another program has it open
+    monkeypatch.setattr(os, "replace", locked)
+    s = Store(str(tmp_path))
+    assert s.path.endswith("marketmood.db")

@@ -126,7 +126,7 @@ class TestDuplicates(unittest.TestCase):
             self.assertAlmostEqual(s.iloc[0]["mood"], 0.2)    # (0.8 - 0.4) / 2, repeat not counted
             self.assertEqual(s.iloc[0]["relevant"], 2)
         finally:
-            shutil.rmtree(tmp)
+            shutil.rmtree(tmp, ignore_errors=True)  # Windows keeps open SQLite files locked
 
     def test_old_database_gets_new_column(self):
         import sqlite3
@@ -141,7 +141,7 @@ class TestDuplicates(unittest.TestCase):
             cols = {r[1] for r in store.conn.execute("PRAGMA table_info(scores)")}
             self.assertIn("duplicate_of", cols)
         finally:
-            shutil.rmtree(tmp)
+            shutil.rmtree(tmp, ignore_errors=True)  # Windows keeps open SQLite files locked
 
 
 class TestStoreSummaryReport(unittest.TestCase):
@@ -149,7 +149,7 @@ class TestStoreSummaryReport(unittest.TestCase):
         self.dir = tempfile.mkdtemp()
 
     def tearDown(self):
-        shutil.rmtree(self.dir)
+        shutil.rmtree(self.dir, ignore_errors=True)  # Windows keeps open SQLite files locked
 
     def test_store_never_rescores(self):
         store = Store(self.dir)
@@ -211,7 +211,7 @@ class TestCLI(unittest.TestCase):
             data = pd.read_csv(csv, encoding="utf-8-sig")
             self.assertEqual(set(data.ticker), {"MRK", "T"})
         finally:
-            shutil.rmtree(tmp)
+            shutil.rmtree(tmp, ignore_errors=True)  # Windows keeps open SQLite files locked
 
     def test_watchlist_parsing(self):
         tmp = tempfile.mkdtemp()
@@ -224,7 +224,7 @@ class TestCLI(unittest.TestCase):
             self.assertEqual(tickers, ["MSFT", "AAPL", "T", "C"])
             self.assertEqual(names, {"T": "AT&T", "C": "Citigroup"})
         finally:
-            shutil.rmtree(tmp)
+            shutil.rmtree(tmp, ignore_errors=True)  # Windows keeps open SQLite files locked
 
 
 if __name__ == "__main__":

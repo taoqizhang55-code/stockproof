@@ -70,7 +70,7 @@ class DashboardServer(unittest.TestCase):
     def tearDownClass(cls):
         cls.server.shutdown()
         cls.server.server_close()
-        shutil.rmtree(cls.dir)
+        shutil.rmtree(cls.dir, ignore_errors=True)  # Windows keeps open SQLite files locked
 
     def get(self, path):
         with urllib.request.urlopen(f"http://127.0.0.1:{self.port}{path}") as r:
@@ -157,7 +157,7 @@ class RefreshJob(unittest.TestCase):
             rows = {r["ticker"]: r for r in app.overview("en")}
             self.assertAlmostEqual(rows["AAPL"]["mood"], 0.3)
         finally:
-            shutil.rmtree(tmp)
+            shutil.rmtree(tmp, ignore_errors=True)  # Windows keeps open SQLite files locked
 
 
 if __name__ == "__main__":

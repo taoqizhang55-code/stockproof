@@ -153,7 +153,7 @@ class TestEarningsCLI(unittest.TestCase):
             hist = pd.read_csv(csv, encoding="utf-8-sig")
             self.assertEqual(len(hist), 15)
         finally:
-            shutil.rmtree(tmp)
+            shutil.rmtree(tmp, ignore_errors=True)  # Windows keeps open SQLite files locked
 
     def test_report_both_languages(self):
         qe = eps.add_sue(eps.quarterly_eps(fake_facts()))
@@ -253,4 +253,4 @@ class TestSixK(unittest.TestCase):
             self.assertEqual(row["read"]["filed"], "2026-08-28")
             self.assertEqual(row["read"]["tone"], 0.2)
         finally:
-            shutil.rmtree(tmp)
+            shutil.rmtree(tmp, ignore_errors=True)  # Windows keeps open SQLite files locked
