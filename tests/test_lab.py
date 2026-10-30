@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from marketmood import lab
+from stockproof import lab
 
 
 def _setup(tmp_path, effect=0.004, seed=0):
@@ -92,8 +92,8 @@ def test_confirm_runs_once_on_the_holdout(tmp_path):
 
 
 def test_policy_strategy(tmp_path):
-    from marketmood import policy as pl
-    from marketmood.store import Store
+    from stockproof import policy as pl
+    from stockproof.store import Store
     d = tmp_path / "pd"
     d.mkdir()
     days = pd.bdate_range("2016-01-01", dt.date.today())
@@ -165,7 +165,7 @@ def test_similar_and_history(tmp_path):
 
 
 def test_mcp_lab_tools(tmp_path, monkeypatch):
-    from marketmood import mcp_server
+    from stockproof import mcp_server
     d = _setup(tmp_path)
     t = mcp_server.Tools(d)
     opened = []
@@ -183,7 +183,7 @@ def test_mcp_lab_tools(tmp_path, monkeypatch):
 
 
 def test_custom_screen(tmp_path, monkeypatch):
-    from marketmood import screener
+    from stockproof import screener
     import test_screener as ts
     codes = [f"6000{i:02d}" for i in range(20)]
     pan = screener.panel(None, "2018-01-01", log=lambda *a: None,
@@ -192,7 +192,7 @@ def test_custom_screen(tmp_path, monkeypatch):
                          "cap": np.linspace(20, 400, 20), "pe": np.linspace(10, 60, 20), "pb": 2.0})
     monkeypatch.setattr(screener, "panel", lambda *a, **k: pan)
     monkeypatch.setattr(screener, "snapshot", lambda *a, **k: snap)
-    monkeypatch.setenv("MARKETMOOD_TODAY", "2026-11-06")
+    monkeypatch.setenv("STOCKPROOF_TODAY", "2026-11-06")
     lab._CACHE.clear()
     r = lab.custom_screen(str(tmp_path), [{"field": "cap", "op": ">=", "value": 100}, {"field": "pe", "op": "<", "value": 40}],
                           sort_by="rev_yoy", top=5)

@@ -1,8 +1,8 @@
 import numpy as np
 import pandas as pd
 
-from marketmood import policy as pl
-from marketmood.store import Store
+from stockproof import policy as pl
+from stockproof.store import Store
 
 
 ITEMS = [
@@ -134,7 +134,7 @@ def test_study_and_backtest_find_planted_effect():
 
 def test_scorecard_policy_dimension(tmp_path):
     import json as _json
-    from marketmood import scorecard as scd
+    from stockproof import scorecard as scd
     d = str(tmp_path)
     store = Store(d)
     store.conn.executescript(pl.SCHEMA)

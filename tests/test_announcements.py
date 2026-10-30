@@ -2,8 +2,8 @@
 
 import pytest
 
-from marketmood import announcements as an
-from marketmood.store import Store
+from stockproof import announcements as an
+from stockproof.store import Store
 
 CASES = [
     ("中微公司:大股东大宗交易减持股份计划公告", "insider_selling", 3),
@@ -40,7 +40,7 @@ def test_classify_real_titles(title, cat, imp):
 
 
 def test_fetch_read_and_recent(tmp_path, monkeypatch):
-    from marketmood import cn
+    from stockproof import cn
     items = [{"art_code": "AN1", "title": "中微公司:大股东大宗交易减持股份计划公告", "date": "2099-01-02", "column": "", "name": "中微公司"},
              {"art_code": "AN2", "title": "中微公司:第三届董事会会议决议公告", "date": "2099-01-02", "column": "", "name": "中微公司"},
              {"art_code": "AN3", "title": "中微公司:旧公告", "date": "2000-01-01", "column": "", "name": "中微公司"}]

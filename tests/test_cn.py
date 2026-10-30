@@ -12,9 +12,9 @@ from unittest import mock
 
 import pandas as pd
 
-from marketmood import cli, cn, core
-from marketmood.eps import add_sue
-from marketmood.store import Store
+from stockproof import cli, cn, core
+from stockproof.eps import add_sue
+from stockproof.store import Store
 
 
 # ---------------------------------------------------------------- fakes
@@ -273,7 +273,7 @@ class TestPipelines(Base):
 
     def test_cli_earnings_china_needs_no_sec_contact(self):
         report = os.path.join(self.dir, "e.html")
-        with mock.patch.dict(os.environ, {"MARKETMOOD_SEC_CONTACT": ""}), \
+        with mock.patch.dict(os.environ, {"STOCKPROOF_SEC_CONTACT": ""}), \
              mock.patch.object(cli.LLMClient, "from_provider", return_value=FakeLLM()):
             with self.assertRaises(SystemExit) as code:
                 cli.main(["earnings", "600519", "00700", "--data-dir", self.dir, "--report", report, "--lang", "zh"])

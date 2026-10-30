@@ -2,8 +2,8 @@
 
 import pytest
 
-from marketmood import cn, compare
-from marketmood.store import Store
+from stockproof import cn, compare
+from stockproof.store import Store
 
 
 def test_cn_docs_pick_latest_two_results_documents(monkeypatch):

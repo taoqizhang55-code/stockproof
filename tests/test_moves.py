@@ -7,8 +7,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from marketmood import explain, quotes
-from marketmood.store import Store
+from stockproof import explain, quotes
+from stockproof.store import Store
 
 
 def write(data_dir, ticker, closes, days):

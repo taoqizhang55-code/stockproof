@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from marketmood import portfolio as pf
+from stockproof import portfolio as pf
 
 
 def fake_fetch_factory(seed=0):
@@ -68,7 +68,7 @@ def test_weights_input(tmp_path):
 
 
 def test_remember_and_saved(tmp_path):
-    from marketmood import portfolio
+    from stockproof import portfolio
     d = str(tmp_path)
     assert portfolio.saved(d) == {"last": "", "reports": []}
     portfolio.remember(d, "  600519 100, AAPL 20 ")

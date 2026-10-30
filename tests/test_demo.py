@@ -5,8 +5,8 @@ import os
 
 import pandas as pd
 
-from marketmood import screener
-from marketmood.store import Store
+from stockproof import screener
+from stockproof.store import Store
 
 ROOT = os.path.join(os.path.dirname(__file__), "..")
 
@@ -50,7 +50,7 @@ def test_make_demo_and_run(tmp_path, monkeypatch):
     assert (out / "quotes" / "AAPL.csv").exists() and (out / "policy" / "results.json").exists()
     # only the chosen stocks' rows are copied
     import sqlite3
-    con = sqlite3.connect(out / "marketmood.db")
+    con = sqlite3.connect(out / "stockproof.db")
     assert [r[0] for r in con.execute("SELECT ticker FROM headlines")] == ["AAPL"]
     assert con.execute("SELECT COUNT(*) FROM scores").fetchone()[0] == 1
     cards = json.loads(next((out / "screens").glob("scorecards_*.json")).read_text())
@@ -58,12 +58,12 @@ def test_make_demo_and_run(tmp_path, monkeypatch):
     screen = json.loads(next((out / "screens").glob("cn_2*.json")).read_text())
     assert set(screen["all"]) == {"301308.SZ"}
 
-    from marketmood import demo
+    from stockproof import demo
     monkeypatch.setattr(demo, "BUNDLE", str(out))
-    monkeypatch.delenv("MARKETMOOD_TODAY", raising=False)
+    monkeypatch.delenv("STOCKPROOF_TODAY", raising=False)
     app = demo.make_app("zh", target=str(tmp_path / "run"))
     try:
-        from marketmood import clock
+        from stockproof import clock
         assert clock.today() == dt.date.fromisoformat(meta["as_of"])
         st = app.state()
         assert st["demo"]["as_of"] == meta["as_of"] and st["watchlist"] == ["AAPL", "000898.SZ"]
@@ -75,4 +75,4 @@ def test_make_demo_and_run(tmp_path, monkeypatch):
         app.set_watchlist(["AAPL"])
         assert json.loads((out / "dashboard.json").read_text())["watchlist"] == ["AAPL", "000898.SZ"]
     finally:
-        os.environ.pop("MARKETMOOD_TODAY", None)
+        os.environ.pop("STOCKPROOF_TODAY", None)

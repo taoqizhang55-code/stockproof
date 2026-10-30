@@ -1,8 +1,8 @@
 import datetime as dt
 import json
 
-from marketmood import scorecard as scd
-from marketmood.store import Store
+from stockproof import scorecard as scd
+from stockproof.store import Store
 
 
 class FakeApp:
@@ -122,8 +122,8 @@ def test_save_batch_merges(tmp_path):
 
 
 def test_dashboard_screen_and_card(tmp_path, monkeypatch):
-    from marketmood import screener
-    from marketmood.dashboard import Dashboard
+    from stockproof import screener
+    from stockproof.dashboard import Dashboard
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
     day = dt.date.today().isoformat()
     screener.save(str(tmp_path), [{"ticker": "301308.SZ", "name": "江波龙", "rank": 2, "score": 98.9, "reasons": []}],

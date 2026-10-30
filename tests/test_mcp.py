@@ -9,7 +9,7 @@ import sys
 import pytest
 
 import test_moves as tm
-from marketmood import mcp_server
+from stockproof import mcp_server
 
 
 def make_tools(tmp_path):
@@ -42,8 +42,8 @@ def test_tools_return_sources_and_hints(tmp_path):
 
 def test_dsh_config_passes_keys_explicitly(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    text = mcp_server.dsh_config(str(tmp_path / "marketmood_data"))
-    assert "@deepseek-ai/dsh-mcp-client" in text and "serverName: marketmood" in text
+    text = mcp_server.dsh_config(str(tmp_path / "stockproof_data"))
+    assert "@deepseek-ai/dsh-mcp-client" in text and "serverName: stockproof" in text
     assert "DEEPSEEK_API_KEY: !!js process.env.DEEPSEEK_API_KEY" in text
     assert sys.executable in text and "sk-" not in text                    # no secret written
 
@@ -57,7 +57,7 @@ def test_stdio_round_trip(tmp_path):
 
     async def go():
         params = StdioServerParameters(command=sys.executable,
-                                       args=["-m", "marketmood", "mcp", "--data-dir", str(tmp_path)],
+                                       args=["-m", "stockproof", "mcp", "--data-dir", str(tmp_path)],
                                        env={"PYTHONPATH": root, "PATH": os.environ.get("PATH", "")})
         async with stdio_client(params) as (r, w):
             async with ClientSession(r, w) as s:
@@ -72,7 +72,7 @@ def test_stdio_round_trip(tmp_path):
 
 def test_install_dsh_merges_and_uninstalls(tmp_path):
     home = tmp_path / "dsh"
-    data = tmp_path / "proj" / "marketmood_data"
+    data = tmp_path / "proj" / "stockproof_data"
     r = mcp_server.install_dsh(str(data), home=str(home), python="/opt/py/bin/python3")
     assert r["ok"] and r["created_home"] and r["backup"] is None
     text = (home / "cordis.patch.yml").read_text()
@@ -81,11 +81,11 @@ def test_install_dsh_merges_and_uninstalls(tmp_path):
     (home / "cordis.patch.yml").write_text("- replace:\n    id: other\n" + text)
     r = mcp_server.install_dsh(str(data), home=str(home), python="/new/python")
     text = (home / "cordis.patch.yml").read_text()
-    assert r["updated"] and r["backup"] and text.count("marketmood-mcp") == 1
+    assert r["updated"] and r["backup"] and text.count("stockproof-mcp") == 1
     assert "id: other" in text and "/new/python" in text and "/opt/py" not in text
     r = mcp_server.uninstall_dsh(home=str(home))
     text = (home / "cordis.patch.yml").read_text()
-    assert r["removed"] and "marketmood" not in text and "id: other" in text
+    assert r["removed"] and "stockproof" not in text and "id: other" in text
     # refuses to touch a file it doesn't understand
     (home / "cordis.patch.yml").write_text("foo: bar\n")
     assert not mcp_server.install_dsh(str(data), home=str(home))["ok"]
@@ -94,14 +94,14 @@ def test_install_dsh_merges_and_uninstalls(tmp_path):
 def test_menu_lists_every_tool(tmp_path):
     import asyncio as _a
     t = mcp_server.Tools(str(tmp_path))
-    menu = t.marketmood_menu("zh")
+    menu = t.stockproof_menu("zh")
     listed = {x for g in menu["groups"] for x in g["tools"]}
     assert [g["group"] for g in menu["groups"]] == ["日常看盘", "选股与评分卡", "量化实验室", "持仓体检", "网页看板"]
     try:
         names = {x.name for x in _a.run(mcp_server.build_server(t).list_tools())}
     except Exception:
         return
-    assert names - listed - {"marketmood_menu", "add_to_watchlist", "remove_from_watchlist"} == set()
+    assert names - listed - {"stockproof_menu", "add_to_watchlist", "remove_from_watchlist"} == set()
 
 
 def test_prompts_listed_and_filled(tmp_path):
@@ -160,23 +160,23 @@ def test_auto_dashboard_off_by_default(tmp_path, monkeypatch):
 
 
 def test_menu_text_lists_everything(tmp_path):
-    txt = mcp_server.Tools(str(tmp_path)).marketmood_menu("zh")["text"]
+    txt = mcp_server.Tools(str(tmp_path)).stockproof_menu("zh")["text"]
     for w in ("日常看盘", "选股与评分卡", "量化实验室", "持仓体检", "/", "打开网页看板"):
         assert w in txt
 
 
 def test_install_writes_skills_and_uninstall_removes_only_ours(tmp_path):
     home, data = tmp_path / "dsh", tmp_path / "data"
-    (home / "skills" / "marketmood-menu").mkdir(parents=True)          # a user's own skill with our name
-    (home / "skills" / "marketmood-menu" / "SKILL.md").write_text("mine")
+    (home / "skills" / "stockproof-menu").mkdir(parents=True)          # a user's own skill with our name
+    (home / "skills" / "stockproof-menu" / "SKILL.md").write_text("mine")
     (home / "skills" / "other").mkdir()
     r = mcp_server.install_dsh(str(data), home=str(home), python="/py")
-    assert "marketmood-checkup" in r["skills"] and "marketmood-menu" not in r["skills"]
-    txt = (home / "skills" / "marketmood-checkup" / "SKILL.md").read_text(encoding="utf-8")
-    assert txt.startswith("---\nname: marketmood-checkup\n") and "portfolio_checkup" in txt
+    assert "stockproof-checkup" in r["skills"] and "stockproof-menu" not in r["skills"]
+    txt = (home / "skills" / "stockproof-checkup" / "SKILL.md").read_text(encoding="utf-8")
+    assert txt.startswith("---\nname: stockproof-checkup\n") and "portfolio_checkup" in txt
     mcp_server.uninstall_dsh(home=str(home))
-    assert not (home / "skills" / "marketmood-checkup").exists()
-    assert (home / "skills" / "marketmood-menu" / "SKILL.md").read_text() == "mine" and (home / "skills" / "other").exists()
+    assert not (home / "skills" / "stockproof-checkup").exists()
+    assert (home / "skills" / "stockproof-menu" / "SKILL.md").read_text() == "mine" and (home / "skills" / "other").exists()
 
 
 def test_welcome_suggests_dashboard_without_opening(tmp_path, monkeypatch):

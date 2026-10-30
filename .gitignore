@@ -3,10 +3,10 @@
 *.key
 
 # Local data and generated output (your database, downloads, reports)
-marketmood_data/
-marketmood_report*.html
-marketmood_earnings*.html
-marketmood_research*.html
+stockproof_data/
+stockproof_report*.html
+stockproof_earnings*.html
+stockproof_research*.html
 *.csv
 *.db
 
@@ -27,8 +27,15 @@ venv/
 .DS_Store
 
 # Generated DSH config with paths from your own computer
-marketmood.cordis.yml
+stockproof.cordis.yml
 
-# ...except the bundled demo data (`marketmood demo`)
-!marketmood/demo_data/*.db
-!marketmood/demo_data/**/*.csv
+# ...except the bundled demo data (`stockproof demo`)
+!stockproof/demo_data/*.db
+!stockproof/demo_data/**/*.csv
+
+# Files from before the rename (marketmood → stockproof)
+marketmood_data/
+marketmood_report*.html
+marketmood_earnings*.html
+marketmood_research*.html
+marketmood.cordis.yml

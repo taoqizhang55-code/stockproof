@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from marketmood import backtest as bt
+from stockproof import backtest as bt
 
 
 def prices_with(days=120, tickers=("600001.SH", "000002.SZ", "300003.SZ", "000004.SZ")):
@@ -76,7 +76,7 @@ def test_full_is_json_safe_and_has_the_sweep():
     json.dumps(out)
     assert out["n_long"] > 0 and len(out["sweep"]) == 6
     assert "long_excess_gross" in out and out["curve"]["dates"]
-    from marketmood.research_report import build_research_report
+    from stockproof.research_report import build_research_report
     for lang, word in (("en", "before costs"), ("zh", "扣成本前")):
         page = build_research_report({"earnings": {"n": 0}, "news": {"n": 0}, "backtest": out}, lang=lang)
         assert word in page and "<polyline" in page

@@ -8,8 +8,8 @@ from unittest import mock
 
 import pandas as pd
 
-from marketmood import cli, earnings, eps, sec
-from marketmood.earnings_report import build_earnings_report
+from stockproof import cli, earnings, eps, sec
+from stockproof.earnings_report import build_earnings_report
 
 
 def q(start, end, val, filed, fy, fp, form="10-Q"):
@@ -219,8 +219,8 @@ class TestSixK(unittest.TestCase):
         self.assertEqual(len(calls) - n, 2)       # the two non-results filings are not fetched again
 
     def test_core_reads_6k_when_no_8k(self):
-        from marketmood import core
-        from marketmood.store import Store
+        from stockproof import core
+        from stockproof.store import Store
 
         class Cache:
             def __init__(self):

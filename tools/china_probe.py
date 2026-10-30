@@ -1,6 +1,6 @@
 """
 China data probe: checks which Chinese data sources work from this computer,
-and records exactly what they return, so marketmood's China module is built
+and records exactly what they return, so stockproof's China module is built
 on real formats instead of guesses.
 
 Run (inside the Python 3.14 environment):

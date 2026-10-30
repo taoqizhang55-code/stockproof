@@ -3,7 +3,7 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "marketmood"
+name = "stockproof"
 version = "0.2.0"
 description = "An LLM reads stock news, earnings and announcements (US, China A-shares, HK) with cited sources; a research toolkit tests every signal against history."
 readme = "README.md"
@@ -27,20 +27,20 @@ dependencies = [
 dev = ["pytest"]
 # China markets (A-shares, Hong Kong). AKShare needs Python 3.11+
 cn = ["akshare; python_version >= \"3.11\""]
-# price download for `marketmood research --download`
+# price download for `stockproof research --download`
 research = ["yfinance"]
-# `marketmood mcp`: tools for AI agents (MCP needs Python 3.10+)
+# `stockproof mcp`: tools for AI agents (MCP needs Python 3.10+)
 mcp = ["mcp; python_version >= \"3.10\""]
 
 [project.urls]
-Homepage = "https://github.com/taoqizhang55-code/marketmood"
-Issues = "https://github.com/taoqizhang55-code/marketmood/issues"
+Homepage = "https://github.com/taoqizhang55-code/stockproof"
+Issues = "https://github.com/taoqizhang55-code/stockproof/issues"
 
 [project.scripts]
-marketmood = "marketmood.cli:main"
+stockproof = "stockproof.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["marketmood*"]
+include = ["stockproof*"]
 
 [tool.setuptools.package-data]
-marketmood = ["demo_data/*", "demo_data/**/*"]
+stockproof = ["demo_data/*", "demo_data/**/*"]

@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-from marketmood import screener as sc
+from stockproof import screener as sc
 
 
 def _tables(codes, years=range(2018, 2024), growth=None):
@@ -100,7 +100,7 @@ def test_checkpoints():
 
 
 def test_cli_screen_offline(tmp_path, monkeypatch, capsys):
-    from marketmood import cli
+    from stockproof import cli
     codes = [f"6000{i:02d}" for i in range(20)]
     pan = sc.panel(None, "2018-01-01", log=lambda *a: None,
                    tables=_tables(codes, years=range(2022, 2027), growth={c: 0.002 * i for i, c in enumerate(codes)}))
@@ -138,7 +138,7 @@ class _R:
 
 
 def test_snapshot_pages(tmp_path, monkeypatch):
-    from marketmood import cn
+    from stockproof import cn
     pages = {1: [{"f12": "600519", "f14": "贵州茅台", "f2": 1500.0, "f24": 5.0, "f25": -2.0, "f20": 1.9e12,
                   "f9": 22.0, "f23": 7.0}],
              2: [{"f12": "000001", "f14": "平安银行", "f2": "-", "f24": "-", "f25": "-", "f20": "-",
@@ -160,7 +160,7 @@ def test_snapshot_pages(tmp_path, monkeypatch):
 
 
 def test_snapshot_falls_back_to_sina(tmp_path, monkeypatch):
-    from marketmood import cn
+    from stockproof import cn
     boards = {"sh_a": [{"code": "600519", "name": "贵州茅台", "trade": "1500.00", "per": 22.1, "pb": 7.0, "mktcap": 1.9e8},
                        {"code": "600000", "name": "浦发银行", "trade": "0.000", "per": 5, "pb": 0.5, "mktcap": 3e7}],
               "sz_a": [{"code": "000001", "name": "平安银行", "trade": "11.0", "per": 5, "pb": 0.5, "mktcap": 2e7}],

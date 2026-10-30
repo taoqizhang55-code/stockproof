@@ -1,7 +1,7 @@
 """
-Build the offline demo bundle (marketmood/demo_data) from a real marketmood_data folder.
+Build the offline demo bundle (stockproof/demo_data) from a real stockproof_data folder.
 
-    python tools/make_demo.py                      # uses ./marketmood_data
+    python tools/make_demo.py                      # uses ./stockproof_data
     python tools/make_demo.py --data-dir path --tickers AAPL NVDA 600519 ...
 
 Copies only what the dashboard shows for a few stocks: their headlines and AI scores, earnings readings,
@@ -10,8 +10,8 @@ results and the policy study summary. API keys and personal settings are never c
 anywhere; the SEC contact lives only in your shell).
 
 Before running it, make fresh scorecards so the demo has them:
-    python -m marketmood scorecard --top 8
-    python -m marketmood scorecard AAPL NVDA 600519 300750 000898 00700 --no-refresh
+    python -m stockproof scorecard --top 8
+    python -m stockproof scorecard AAPL NVDA 600519 300750 000898 00700 --no-refresh
 """
 
 import argparse
@@ -23,11 +23,11 @@ import sqlite3
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-from marketmood import cn  # noqa: E402
+from stockproof import cn  # noqa: E402
 
 DEFAULT = ["AAPL", "NVDA", "MSFT", "JPM", "MRK", "BABA", "600519.SH", "300750.SZ", "000898.SZ", "00700.HK",
            "09988.HK"]
-OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "marketmood", "demo_data")
+OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "stockproof", "demo_data")
 EPS_CONCEPTS = ["EarningsPerShareBasic", "EarningsPerShareDiluted", "EarningsPerShareBasicAndDiluted"]
 
 
@@ -48,7 +48,7 @@ def latest(folder, prefix, suffix):
 
 def main(argv=None):
     ap = argparse.ArgumentParser()
-    ap.add_argument("--data-dir", default="marketmood_data")
+    ap.add_argument("--data-dir", default="stockproof_data")
     ap.add_argument("--tickers", nargs="*", default=DEFAULT)
     ap.add_argument("--lang", default="zh")
     ap.add_argument("--out", default=OUT)
@@ -79,8 +79,11 @@ def main(argv=None):
         json.dump(cards, open(os.path.join(OUT_DIR, "screens", cards_file), "w", encoding="utf-8"), ensure_ascii=False)
 
     # --- database rows for these tickers
-    con = sqlite3.connect(os.path.join(src, "marketmood.db"))
-    out = sqlite3.connect(os.path.join(OUT_DIR, "marketmood.db"))
+    db = os.path.join(src, "stockproof.db")
+    if not os.path.exists(db):                                    # name before 0.3
+        db = os.path.join(src, "marketmood.db")
+    con = sqlite3.connect(db)
+    out = sqlite3.connect(os.path.join(OUT_DIR, "stockproof.db"))
     tables = {r[0]: r[1] for r in con.execute("SELECT name, sql FROM sqlite_master WHERE type='table'")}
     marks = ",".join("?" * len(tickers))
 

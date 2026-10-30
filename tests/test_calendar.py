@@ -7,7 +7,7 @@ import types
 
 import pandas as pd
 
-from marketmood import earnings_calendar as cal
+from stockproof import earnings_calendar as cal
 
 
 def test_open_periods():

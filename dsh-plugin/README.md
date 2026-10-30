@@ -1,4 +1,4 @@
-# dsh-plugin-marketmood
+# dsh-plugin-stockproof
 
 在 DeepSeek Harness（DSH）里直接问股票：新闻情绪、财报解读、公告、异动原因、财报日历、研究结论。
 美股、A 股、港股都支持，**每条信息都附原文链接**，数字由工具计算，AI 只负责组织语言。
@@ -24,28 +24,28 @@ earnings calendar and research findings — for US, China A-share and Hong Kong 
 适用于任何电脑（macOS / Windows / Linux，桌面版和 `dsh web` 都可以）。Works on any computer, desktop app included:
 
 ```bash
-pip install "marketmood[mcp,cn]"        # Python 3.10+（A 股/港股需要 3.11+）
-marketmood mcp --install-dsh            # 自动找到这台电脑上的 Python，写入 DSH 配置（会先备份）
+pip install "stockproof[mcp,cn]"        # Python 3.10+（A 股/港股需要 3.11+）
+stockproof mcp --install-dsh            # 自动找到这台电脑上的 Python，写入 DSH 配置（会先备份）
 ```
 
-然后重启 DSH，问它"我关注的股票今天有什么重要的事？"。工具名形如 `mcp__marketmood__stock_brief`。
+然后重启 DSH，问它"我关注的股票今天有什么重要的事？"。工具名形如 `mcp__stockproof__stock_brief`。
 Restart DSH and ask away.
 
 - `--install-dsh` 写入 `~/.dsh/cordis.patch.yml`（DSH 所有配置都会读取它，包括桌面版；设置了 `DSH_HOME` 就写到那里）。
-  原有内容保留，文件先备份；再运行一次是更新，不会重复添加。`marketmood mcp --uninstall-dsh` 可以删除。
-- API key 不写进任何文件：从程序坞打开的 App 看不到终端里的环境变量，所以 marketmood 启动时自己从你的
+  原有内容保留，文件先备份；再运行一次是更新，不会重复添加。`stockproof mcp --uninstall-dsh` 可以删除。
+- API key 不写进任何文件：从程序坞打开的 App 看不到终端里的环境变量，所以 stockproof 启动时自己从你的
   shell 读取 `DEEPSEEK_API_KEY`（只在内存中使用）。Windows 上系统环境变量本来就对所有程序可见。
-- 数据默认放在运行安装命令时所在文件夹的 `marketmood_data` 里，可以用 `--data-dir` 指定。
+- 数据默认放在运行安装命令时所在文件夹的 `stockproof_data` 里，可以用 `--data-dir` 指定。
 
-**用 `dsh plugin` 安装（web 配置）/ As a DSH plugin package:** `dsh plugin --profile web add github:taoqizhang55-code/marketmood#main&path:/dsh-plugin`。
-这种方式需要在启动 dsh 的终端里设置 `MARKETMOOD_PYTHON`（装了 marketmood 的 python）和 `MARKETMOOD_HOME`（数据文件夹）。
+**用 `dsh plugin` 安装（web 配置）/ As a DSH plugin package:** `dsh plugin --profile web add github:taoqizhang55-code/stockproof#main&path:/dsh-plugin`。
+这种方式需要在启动 dsh 的终端里设置 `STOCKPROOF_PYTHON`（装了 stockproof 的 python）和 `STOCKPROOF_HOME`（数据文件夹）。
 桌面版的插件由 App 自己管理，建议用上面的 `--install-dsh`。
 
 第一次使用：对 DSH 说"关注 600519、AAPL、00700"，它会调用 `refresh_stock` 抓取数据（每只约 30–60 秒）。
 
 ## 工具 / Tools
 
-在 DSH 里问"你能做什么？"，会调用 `marketmood_menu` 按下面四组列出全部功能和示例问题。
+在 DSH 里问"你能做什么？"，会调用 `stockproof_menu` 按下面四组列出全部功能和示例问题。
 
 **日常看盘 / Daily**
 
@@ -93,13 +93,13 @@ Restart DSH and ask away.
 
 第一次使用时，DeepSeek 会在对话里介绍全部功能，并推荐打开网页看板体验（不会自己弹窗）；之后说"打开网页看板"随时打开，问"你能做什么"随时列出全部功能。
 
-输入 `/marketmood` 可以在"技能"里选现成的问题（`marketmood mcp --install-dsh` 会一起装好）：打开网页看板、能做什么、看盘、为什么涨跌、财报对比、评分卡、选股、回测想法、类似情况、持仓体检。
+输入 `/stockproof` 可以在"技能"里选现成的问题（`stockproof mcp --install-dsh` 会一起装好）：打开网页看板、能做什么、看盘、为什么涨跌、财报对比、评分卡、选股、回测想法、类似情况、持仓体检。
 
 ## 数据与隐私 / Data and privacy
 
 - 数据来源：Yahoo/Google 新闻 RSS、SEC EDGAR、东方财富与新浪（经 AKShare）、Nasdaq 公开日历。
-  这些是免费的公开接口，可能变化或限流；东方财富请求过快会被暂时拒绝，marketmood 已自动放慢并在被拒时停止。
-- 所有数据保存在本机 `MARKETMOOD_HOME/marketmood_data`，API 密钥不会写入任何文件。
+  这些是免费的公开接口，可能变化或限流；东方财富请求过快会被暂时拒绝，stockproof 已自动放慢并在被拒时停止。
+- 所有数据保存在本机 `STOCKPROOF_HOME/stockproof_data`，API 密钥不会写入任何文件。
 - 仅供信息和研究参考，不构成投资建议。
 
 MIT License.

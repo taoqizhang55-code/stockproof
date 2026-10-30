@@ -1,11 +1,11 @@
 {
-  "name": "dsh-plugin-marketmood",
+  "name": "dsh-plugin-stockproof",
   "version": "0.1.0",
-  "description": "Stock news, earnings reports, announcements and research for US, China A-share and Hong Kong stocks, as DeepSeek Harness tools (via the marketmood MCP server).",
+  "description": "Stock news, earnings reports, announcements and research for US, China A-share and Hong Kong stocks, as DeepSeek Harness tools (via the stockproof MCP server).",
   "license": "MIT",
   "type": "module",
   "keywords": ["dsh-plugin", "deepseek-harness", "mcp", "stocks", "finance", "a-shares", "earnings"],
-  "repository": { "type": "git", "url": "https://github.com/taoqizhang55-code/marketmood", "directory": "dsh-plugin" },
+  "repository": { "type": "git", "url": "https://github.com/taoqizhang55-code/stockproof", "directory": "dsh-plugin" },
   "exports": { "./locale/*.json": "./locale/*.json", "./icon": "./icon.svg" },
   "files": ["cordis.patch.yml", "locale/*.json", "icon.svg", "README.md"],
   "dsh": { "bundle": { "patch": "./cordis.patch.yml" } }

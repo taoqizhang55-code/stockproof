@@ -4,8 +4,8 @@ import datetime as dt
 import json
 
 import test_moves as tm
-from marketmood import announcements, digest
-from marketmood.dashboard import Dashboard
+from stockproof import announcements, digest
+from stockproof.dashboard import Dashboard
 
 
 def test_digest_sections_and_opening(tmp_path):

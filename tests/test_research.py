@@ -6,9 +6,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from marketmood import research as rs
-from marketmood.research_report import build_research_report
-from marketmood.store import Store
+from stockproof import research as rs
+from stockproof.research_report import build_research_report
+from stockproof.store import Store
 
 
 def make_prices(days=200, tickers=("AAA", "BBB", "CCC", "DDD")):
@@ -164,7 +164,7 @@ def test_summarize_earnings_with_tone(tmp_path):
 
 
 def test_backfill_reads_saves_and_skips_cached(tmp_path, monkeypatch):
-    from marketmood import earnings as er
+    from stockproof import earnings as er
 
     class FakeClient:
         model = "fake"
@@ -190,7 +190,7 @@ def test_backfill_reads_saves_and_skips_cached(tmp_path, monkeypatch):
 
 
 def test_saved_results_feed_the_dashboard(tmp_path):
-    from marketmood.dashboard import Dashboard
+    from stockproof.dashboard import Dashboard
     d = str(tmp_path)
     app = Dashboard(d, "deepseek", None, None)
     assert app.research_page("us", "en") is None and app.state()["research"] == {"us": None, "cn": None}
@@ -218,7 +218,7 @@ def test_benchmark_choice():
 
 def test_history_for_and_dashboard_alerts(tmp_path):
     import datetime as dt
-    from marketmood.dashboard import Dashboard
+    from stockproof.dashboard import Dashboard
     rng = np.random.default_rng(4)
     n = 400
     ev = pd.DataFrame({"ticker": "AAA", "sue": rng.normal(0, 1.5, n), "tone": rng.uniform(-1, 1, n),

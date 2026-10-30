@@ -1,5 +1,5 @@
 # The 60 stocks used in the research (quant_system experiments 4-6).
-# Daily: marketmood scan --watchlist watchlist_research.txt
+# Daily: stockproof scan --watchlist watchlist_research.txt
 
 AAPL, Apple
 MSFT, Microsoft

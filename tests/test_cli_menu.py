@@ -1,10 +1,10 @@
-from marketmood import cli
+from stockproof import cli
 
 
 def test_menu_language():
     assert cli.menu_lang({"LANG": "zh_CN.UTF-8"}) == "zh"
     assert cli.menu_lang({"LANG": "en_US.UTF-8"}) == "en"
-    assert cli.menu_lang({"MARKETMOOD_LANG": "zh", "LANG": "en_US"}) == "zh"
+    assert cli.menu_lang({"STOCKPROOF_LANG": "zh", "LANG": "en_US"}) == "zh"
 
 
 def test_menu_commands_exist_and_groups_shown():
@@ -19,7 +19,7 @@ def test_menu_commands_exist_and_groups_shown():
 
 
 def test_no_args_prints_menu(capsys, monkeypatch):
-    monkeypatch.setenv("MARKETMOOD_LANG", "en")
+    monkeypatch.setenv("STOCKPROOF_LANG", "en")
     try:
         cli.main([])
     except SystemExit as e:

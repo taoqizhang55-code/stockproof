@@ -1,4 +1,4 @@
-# marketmood
+# stockproof · 有据
 
 **让大模型替你读股票新闻、财报和公司公告，每条结论都附原文出处。再用多年历史数据逐一检验这些信号到底有没有用，并在界面上如实标明检验结果。**
 支持美股、A 股（沪深北）和港股，中英文界面。
@@ -8,8 +8,8 @@
 **30 秒试用。** 演示内置真实数据，离线运行，不需要 API key：
 
 ```bash
-pip install "git+https://github.com/taoqizhang55-code/marketmood"
-marketmood demo
+pip install "git+https://github.com/taoqizhang55-code/stockproof"
+stockproof demo
 ```
 
 ![选股与证据评分卡](docs/images/screen.png)
@@ -49,21 +49,21 @@ marketmood demo
 | **持仓体检** | `portfolio` | 用真实历史股价体检你的持仓：集中度、看似分散其实同涨同跌的股票、风险从哪来，并用今天的仓位重演 2015、2018、2020、2021–22、2024 年的大跌。 |
 | **AI 智能体** | `mcp` | 23 个 MCP 工具，含 DeepSeek Harness 插件（`dsh-plugin/`），Claude 和 Cursor 也能用。上面每一项功能都能用中文直接问；问"你能做什么"会列出全部功能。另外让 DeepSeek **做到它原本做不到的事**：用真实数据回测、筛选 5000 只股票、体检你的持仓。 |
 
-所有功能都在一个本地网页看板里：`marketmood dashboard`。**首页**列出能做的事，例子点一下就能跑；**实验室**页用表单回测想法，不用写 JSON；**持仓体检**页体检你的持仓，填过的持仓下次自动填好。第一次在 DeepSeek Harness 里用 marketmood 时，DeepSeek 会在对话里列出全部功能，并推荐打开网页看板体验；之后问"你能做什么"、输入 `/marketmood` 选现成问题，或说"打开网页看板"都可以；说"打开网页看板的实验室页"可以直接跳到某一页。命令行直接输入 `marketmood` 会显示同样的分组菜单；在 DeepSeek Harness 里输入 `/` 可以选现成的问题（体检持仓、回测想法、为什么涨跌……）。
+所有功能都在一个本地网页看板里：`stockproof dashboard`。**首页**列出能做的事，例子点一下就能跑；**实验室**页用表单回测想法，不用写 JSON；**持仓体检**页体检你的持仓，填过的持仓下次自动填好。第一次在 DeepSeek Harness 里用 stockproof 时，DeepSeek 会在对话里列出全部功能，并推荐打开网页看板体验；之后问"你能做什么"、输入 `/stockproof` 选现成问题，或说"打开网页看板"都可以；说"打开网页看板的实验室页"可以直接跳到某一页。命令行直接输入 `stockproof` 会显示同样的分组菜单；在 DeepSeek Harness 里输入 `/` 可以选现成的问题（体检持仓、回测想法、为什么涨跌……）。
 
-### 大模型自己做不到，装了 marketmood 就能做到
+### 大模型自己做不到，装了 stockproof 就能做到
 
 在 DeepSeek Harness 里问："A 股业绩大超预期的公司，财报公布后第二天买入持有 20 天，扣费后能跑赢吗？"
 DeepSeek 把问题翻译成策略，实验室用十年 A 股数据现场回测，浏览器自动弹出报告。结论是**不能**：每年 −3.6%（t = −2.0），
 2020 年前 4 年里有 3 年为正，2020–2024 年每年都是负的。再让它换个条件试，它会提醒你"已经试了 2 个版本，显著性门槛提高到 2.24"。
 
-![在 DeepSeek Harness 里用 marketmood 现场回测](docs/images/dsh_lab.png)
+![在 DeepSeek Harness 里用 stockproof 现场回测](docs/images/dsh_lab.png)
 
 <p align="center"><img src="docs/images/lab_report.png" width="48%" alt="量化实验室报告"> <img src="docs/images/portfolio.png" width="48%" alt="持仓体检"></p>
 
-在 DeepSeek Harness 里输入 `/marketmood`，可以选 10 个现成的问题：
+在 DeepSeek Harness 里输入 `/stockproof`，可以选 10 个现成的问题：
 
-<p align="center"><img src="docs/images/dsh_skills.png" width="80%" alt="DeepSeek Harness 里的 marketmood 技能"></p>
+<p align="center"><img src="docs/images/dsh_skills.png" width="80%" alt="DeepSeek Harness 里的 stockproof 技能"></p>
 
 ## 研究发现
 
@@ -78,7 +78,7 @@ DeepSeek 把问题翻译成策略，实验室用十年 A 股数据现场回测�
 | 按基本面选股能跑赢吗？ | **不能。** 综合分前 30 名每年比同一股票池多 +1.3%（t = 0.5）；只看走势是 +6.4%（t = 1.5，不显著）。 |
 | 新闻联播的政策措辞能预测行业涨跌吗？ | **普通人交易不了。** 在 8490 次中央新举措中，措辞强弱在**开盘前**就已经反映在价格里（+0.03%，t = 5.3；最强一级 +0.12%）。之后，受支持的行业反而略微跑输。回测每年 +0.6%（t = 0.4）。 |
 
-这些结论的共同点是：公开信息会被市场很快消化。所以 marketmood 的定位是**帮你更快地阅读和核实证据**，而不是给你一个买卖信号。看板上凡是出现分数的地方，都会如实写明这一点。
+这些结论的共同点是：公开信息会被市场很快消化。所以 stockproof 的定位是**帮你更快地阅读和核实证据**，而不是给你一个买卖信号。看板上凡是出现分数的地方，都会如实写明这一点。
 
 ## 设计原则
 
@@ -94,10 +94,10 @@ DeepSeek 把问题翻译成策略，实验室用十年 A 股数据现场回测�
 需要 Python 3.10 以上（A 股和港股需要 3.11 以上）。
 
 ```bash
-pip install "marketmood[cn,mcp] @ git+https://github.com/taoqizhang55-code/marketmood"
+pip install "stockproof[cn,mcp] @ git+https://github.com/taoqizhang55-code/stockproof"
 export DEEPSEEK_API_KEY="sk-..."
-export MARKETMOOD_SEC_CONTACT="你的名字 you@example.com"   # 只有美股财报需要（SEC 要求）
-marketmood dashboard
+export STOCKPROOF_SEC_CONTACT="你的名字 you@example.com"   # 只有美股财报需要（SEC 要求）
+stockproof dashboard
 ```
 
 在网页里添加股票（`600519`、`300750`、`00700`、`AAPL`……），然后点"更新新闻"和"更新财报"。
@@ -105,24 +105,24 @@ marketmood dashboard
 ## 常用命令
 
 ```bash
-marketmood dashboard                         # 打开网页看板
-marketmood screen --top 30                   # 全市场选股
-marketmood screen --backtest --skip-screen   # 用历史数据检验选股规则
-marketmood scorecard                         # 给选股名单前 10 名生成证据评分卡
-marketmood scorecard 600519 000898           # 也可以指定任意股票
-marketmood research --market cn --open       # A 股财报事件研究和回测
-marketmood policy                            # 新闻联播政策研究（第一次需要下载几个小时）
-marketmood schedule --time 21:00             # 每晚自动更新（macOS）
-marketmood mcp --install-dsh                 # 一条命令装进 DeepSeek Harness（含桌面版，任何电脑）
-marketmood lab caps                          # 量化实验室：能检验哪些想法
-marketmood lab confirm <id>                  # 在锁定的近两年数据上检验一次
-marketmood portfolio "600519 100, 00700 300, AAPL 50"   # 持仓体检
-marketmood demo                              # 离线演示
+stockproof dashboard                         # 打开网页看板
+stockproof screen --top 30                   # 全市场选股
+stockproof screen --backtest --skip-screen   # 用历史数据检验选股规则
+stockproof scorecard                         # 给选股名单前 10 名生成证据评分卡
+stockproof scorecard 600519 000898           # 也可以指定任意股票
+stockproof research --market cn --open       # A 股财报事件研究和回测
+stockproof policy                            # 新闻联播政策研究（第一次需要下载几个小时）
+stockproof schedule --time 21:00             # 每晚自动更新（macOS）
+stockproof mcp --install-dsh                 # 一条命令装进 DeepSeek Harness（含桌面版，任何电脑）
+stockproof lab caps                          # 量化实验室：能检验哪些想法
+stockproof lab confirm <id>                  # 在锁定的近两年数据上检验一次
+stockproof portfolio "600519 100, 00700 300, AAPL 50"   # 持仓体检
+stockproof demo                              # 离线演示
 ```
 
 ## 数据与局限
 
-- 数据接口是免费、公开但非官方的，可能变化或限流。marketmood 会自动放慢、重试，被拒绝时会给出明确提示后停止。
+- 数据接口是免费、公开但非官方的，可能变化或限流。stockproof 会自动放慢、重试，被拒绝时会给出明确提示后停止。
 - AI 可能读错，每条结论都附原文链接，请以原文为准。
 - **不构成投资建议。** 上面的研究结论，正是这个工具不给买卖建议的原因之一。
 

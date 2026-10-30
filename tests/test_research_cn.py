@@ -8,9 +8,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from marketmood import research as rs
-from marketmood import research_cn as rc
-from marketmood.research_report import build_research_report
+from stockproof import research as rs
+from stockproof import research_cn as rc
+from stockproof.research_report import build_research_report
 
 
 def test_period_ends():
@@ -91,7 +91,7 @@ def test_download_prices_cn_with_fake_akshare(tmp_path, monkeypatch):
 
 
 def test_period_table_retries(tmp_path, monkeypatch):
-    from marketmood import cn
+    from stockproof import cn
     calls = {"n": 0}
 
     def flaky(date):
@@ -128,9 +128,9 @@ def test_report_doc_for_picks_the_right_document():
 
 
 def test_find_docs_and_backfill_with_fakes(tmp_path, monkeypatch):
-    from marketmood import cn
-    from marketmood import earnings as er
-    from marketmood.store import Store
+    from stockproof import cn
+    from stockproof import earnings as er
+    from stockproof.store import Store
     pages = {1: ITEMS[:6], 2: []}
     monkeypatch.setattr(cn, "announcements", lambda info, page_size=50, page_index=1: pages.get(page_index, []))
     monkeypatch.setattr(cn, "announcement_text", lambda code: (f"报告正文 {code}", f"https://pdf/{code}"))
@@ -169,7 +169,7 @@ def test_notices_that_mention_a_report_are_not_the_report():
 
 def test_eastmoney_backoff_then_blocked(monkeypatch):
     import requests
-    from marketmood import cn
+    from stockproof import cn
     calls = {"n": 0}
 
     def refuse(*a, **k):
@@ -184,8 +184,8 @@ def test_eastmoney_backoff_then_blocked(monkeypatch):
 
 
 def test_backfill_stops_when_blocked(tmp_path, monkeypatch):
-    from marketmood import cn
-    from marketmood.store import Store
+    from stockproof import cn
+    from stockproof.store import Store
     monkeypatch.setattr(cn, "announcements", lambda info, page_size=50, page_index=1: ITEMS[:6] if page_index == 1 else [])
     calls = {"n": 0}
 

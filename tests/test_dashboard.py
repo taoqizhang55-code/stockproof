@@ -14,9 +14,9 @@ import urllib.request
 from http.server import ThreadingHTTPServer
 from unittest import mock
 
-from marketmood import core
-from marketmood.dashboard import Dashboard, make_handler
-from marketmood.store import Store
+from stockproof import core
+from stockproof.dashboard import Dashboard, make_handler
+from stockproof.store import Store
 
 from test_earnings import fake_facts
 
@@ -87,7 +87,7 @@ class DashboardServer(unittest.TestCase):
 
     def test_page_and_state(self):
         with urllib.request.urlopen(f"http://127.0.0.1:{self.port}/") as r:
-            self.assertIn("marketmood", r.read().decode())
+            self.assertIn("stockproof", r.read().decode())
         s = self.get("/api/state")
         self.assertEqual(s["watchlist"], ["MRK", "INTC", "T"])
         self.assertEqual(s["names"]["T"], "AT&T")
@@ -143,7 +143,7 @@ class RefreshJob(unittest.TestCase):
             items = [{"title": f"story {i}", "link": "", "source": "yahoo",
                       "published": dt.date.today().isoformat()} for i in range(4)]
             with mock.patch.object(core, "fetch_headlines", return_value=(items, [])), \
-                 mock.patch("marketmood.dashboard.LLMClient.from_provider", return_value=FakeLLM()):
+                 mock.patch("stockproof.dashboard.LLMClient.from_provider", return_value=FakeLLM()):
                 ok, _ = app.start_refresh("news")
                 self.assertTrue(ok)
                 self.assertFalse(app.start_refresh("news")[0])      # one job at a time
