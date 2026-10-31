@@ -214,7 +214,7 @@ disclosure date.
 
 ```bash
 pip install -e ".[dev,mcp]"
-pytest              # ~170 offline tests: fake feeds, fake LLM, fake AKShare; no key or network needed
+pytest              # ~180 offline tests: fake feeds, fake LLM, fake AKShare; no key or network needed
 python tools/make_demo.py   # rebuild the demo bundle from your own stockproof_data
 ```
 
