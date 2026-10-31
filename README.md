@@ -6,20 +6,23 @@ check found.** US stocks, China A-shares and Hong Kong. English and 中文.
 
 [![tests](https://github.com/taoqizhang55-code/stockproof/actions/workflows/tests.yml/badge.svg)](https://github.com/taoqizhang55-code/stockproof/actions/workflows/tests.yml)
 ![python](https://img.shields.io/badge/python-3.10%2B-blue) ![license](https://img.shields.io/badge/license-MIT-green)
-· [中文说明](README.zh-CN.md)
+· [中文说明](https://github.com/taoqizhang55-code/stockproof/blob/main/README.zh-CN.md)
 
 **Try it offline in 30 seconds** (no API key, no time limit). The demo opens the full dashboard on bundled real
 data; only buttons that need the internet or an AI model are turned off:
 
 ```bash
-pip install "git+https://github.com/taoqizhang55-code/stockproof"
+pip install stockproof
 stockproof demo
 ```
+
+No GitHub account or git needed. In mainland China, a mirror is faster:
+`pip install stockproof -i https://pypi.tuna.tsinghua.edu.cn/simple`
 
 Liked it? The [10-minute tour](#10-minute-tour) takes you from the demo to your own stocks, a backtest and a
 portfolio check-up.
 
-![Screen and evidence scorecard](docs/images/screen.png)
+![Screen and evidence scorecard](https://raw.githubusercontent.com/taoqizhang55-code/stockproof/main/docs/images/screen.png)
 
 ## What it does
 
@@ -58,7 +61,7 @@ portfolio check-up.
 
 Everything runs in one local web page (`stockproof dashboard`). The **Home** tab shows what you can do, with clickable examples; the **Lab** tab backtests ideas from a form, no JSON needed; the **Portfolio** tab checks up your holdings and remembers them for next time. The first time you use stockproof in DeepSeek Harness, the agent lists everything it can do and suggests trying the dashboard; after that, ask "what can you do?", type `/stockproof` for ready-made requests, or say "open the dashboard". Say "open the dashboard's lab tab" to jump to a page. Running `stockproof` with no arguments prints the same grouped menu, and in DeepSeek Harness typing `/` lists ready-made prompts (check up a portfolio, backtest an idea, why did it move…).
 
-<p align="center"><img src="docs/images/dashboard.png" width="64%" alt="Dashboard"> <img src="docs/images/scorecard.png" width="30%" alt="Evidence scorecard"></p>
+<p align="center"><img src="https://raw.githubusercontent.com/taoqizhang55-code/stockproof/main/docs/images/dashboard.png" width="64%" alt="Dashboard"> <img src="https://raw.githubusercontent.com/taoqizhang55-code/stockproof/main/docs/images/scorecard.png" width="30%" alt="Evidence scorecard"></p>
 
 ### What an LLM can't do alone — and can with stockproof
 
@@ -67,13 +70,13 @@ question into a spec, the lab runs it on ten years of point-in-time A-share data
 The answer was **no**: −3.6% a year (t = −2.0), positive in 3 of 4 years before 2020 and negative every year from 2020 to 2024. Ask for a variant
 and the agent reports that the significance bar went up with the number of tries.
 
-![DeepSeek Harness runs a backtest with stockproof](docs/images/dsh_lab.png)
+![DeepSeek Harness runs a backtest with stockproof](https://raw.githubusercontent.com/taoqizhang55-code/stockproof/main/docs/images/dsh_lab.png)
 
-<p align="center"><img src="docs/images/lab_report.png" width="48%" alt="Quant lab report"> <img src="docs/images/portfolio.png" width="48%" alt="Portfolio check-up"></p>
+<p align="center"><img src="https://raw.githubusercontent.com/taoqizhang55-code/stockproof/main/docs/images/lab_report.png" width="48%" alt="Quant lab report"> <img src="https://raw.githubusercontent.com/taoqizhang55-code/stockproof/main/docs/images/portfolio.png" width="48%" alt="Portfolio check-up"></p>
 
 In DeepSeek Harness, type `/stockproof` for ten ready-made requests:
 
-<p align="center"><img src="docs/images/dsh_skills.png" width="80%" alt="stockproof skills in the DeepSeek Harness / menu"></p>
+<p align="center"><img src="https://raw.githubusercontent.com/taoqizhang55-code/stockproof/main/docs/images/dsh_skills.png" width="80%" alt="stockproof skills in the DeepSeek Harness / menu"></p>
 
 ## What the research found
 
@@ -110,7 +113,7 @@ Python 3.10+ (3.11+ for China markets).
 Works on macOS, Windows and Linux (tested on all three in CI).
 
 ```bash
-pip install "stockproof[cn,mcp] @ git+https://github.com/taoqizhang55-code/stockproof"
+pip install "stockproof[cn,mcp]"
 ```
 
 Then give it an API key (DeepSeek by default; `stockproof providers` lists the others). US earnings also need a

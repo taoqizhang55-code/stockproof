@@ -24,7 +24,7 @@ earnings calendar and research findings — for US, China A-share and Hong Kong 
 适用于任何电脑（macOS / Windows / Linux，桌面版和 `dsh web` 都可以）。Works on any computer, desktop app included:
 
 ```bash
-pip install "stockproof[mcp,cn] @ git+https://github.com/taoqizhang55-code/stockproof"   # Python 3.10+（A 股/港股需要 3.11+）
+pip install "stockproof[mcp,cn]"        # Python 3.10+（A 股/港股需要 3.11+）
 stockproof mcp --install-dsh            # 自动找到这台电脑上的 Python，写入 DSH 配置（会先备份）
 ```
 

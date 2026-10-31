@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -8,11 +8,11 @@ version = "0.3.0"
 description = "LLM stock research with cited sources (news, earnings, filings), tested on 10 years of point-in-time data: quant lab, portfolio check-up, web dashboard, DeepSeek Harness / MCP plugin. US, China A-shares, HK."
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
 keywords = ["stocks", "llm", "sentiment", "earnings", "a-shares", "deepseek", "deepseek-harness", "event-study", "backtesting", "mcp"]
 classifiers = [
     "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Topic :: Office/Business :: Financial :: Investment",
     "Natural Language :: Chinese (Simplified)",
@@ -40,7 +40,7 @@ Issues = "https://github.com/taoqizhang55-code/stockproof/issues"
 stockproof = "stockproof.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["stockproof*"]
+include = ["stockproof", "stockproof.*"]
 
 [tool.setuptools.package-data]
 stockproof = ["demo_data/*", "demo_data/**/*"]

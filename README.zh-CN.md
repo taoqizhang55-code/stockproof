@@ -3,18 +3,21 @@
 **让大模型替你读股票新闻、财报和公司公告，每条结论都附原文出处。再用多年历史数据逐一检验这些信号到底有没有用，并在界面上如实标明检验结果。**
 支持美股、A 股（沪深北）和港股，中英文界面。
 
-[English](README.md)
+[English](https://github.com/taoqizhang55-code/stockproof/blob/main/README.md)
 
 **30 秒装好，离线体验**（不用 API key，不限时）。演示会打开完整的网页看板，用的是内置的真实数据；只有需要联网或调用 AI 的按钮是停用的：
 
 ```bash
-pip install "git+https://github.com/taoqizhang55-code/stockproof"
+pip install stockproof
 stockproof demo
 ```
 
+不需要 GitHub 账号，也不用装 git。国内网络建议用清华镜像，下载更快：
+`pip install stockproof -i https://pypi.tuna.tsinghua.edu.cn/simple`
+
 觉得不错？跟着下面的 [10 分钟上手](#10-分钟上手)，从演示走到你自己的股票、一次回测和一次持仓体检。
 
-![选股与证据评分卡](docs/images/screen.png)
+![选股与证据评分卡](https://raw.githubusercontent.com/taoqizhang55-code/stockproof/main/docs/images/screen.png)
 
 ## 功能
 
@@ -59,13 +62,13 @@ stockproof demo
 DeepSeek 把问题翻译成策略，实验室用十年 A 股数据现场回测，浏览器自动弹出报告。结论是**不能**：每年 −3.6%（t = −2.0），
 2020 年前 4 年里有 3 年为正，2020–2024 年每年都是负的。再让它换个条件试，它会提醒你"已经试了 2 个版本，显著性门槛提高到 2.24"。
 
-![在 DeepSeek Harness 里用 stockproof 现场回测](docs/images/dsh_lab.png)
+![在 DeepSeek Harness 里用 stockproof 现场回测](https://raw.githubusercontent.com/taoqizhang55-code/stockproof/main/docs/images/dsh_lab.png)
 
-<p align="center"><img src="docs/images/lab_report.png" width="48%" alt="量化实验室报告"> <img src="docs/images/portfolio.png" width="48%" alt="持仓体检"></p>
+<p align="center"><img src="https://raw.githubusercontent.com/taoqizhang55-code/stockproof/main/docs/images/lab_report.png" width="48%" alt="量化实验室报告"> <img src="https://raw.githubusercontent.com/taoqizhang55-code/stockproof/main/docs/images/portfolio.png" width="48%" alt="持仓体检"></p>
 
 在 DeepSeek Harness 里输入 `/stockproof`，可以选 10 个现成的问题：
 
-<p align="center"><img src="docs/images/dsh_skills.png" width="80%" alt="DeepSeek Harness 里的 stockproof 技能"></p>
+<p align="center"><img src="https://raw.githubusercontent.com/taoqizhang55-code/stockproof/main/docs/images/dsh_skills.png" width="80%" alt="DeepSeek Harness 里的 stockproof 技能"></p>
 
 ## 研究发现
 
@@ -98,7 +101,7 @@ DeepSeek 把问题翻译成策略，实验室用十年 A 股数据现场回测�
 Mac、Windows、Linux 都能用，三个系统都有自动测试。
 
 ```bash
-pip install "stockproof[cn,mcp] @ git+https://github.com/taoqizhang55-code/stockproof"
+pip install "stockproof[cn,mcp]"
 ```
 
 然后设置 API key（默认用 DeepSeek，`stockproof providers` 可以查看其他模型）。只有美股财报需要第二行的联系方式（SEC 要求）。
