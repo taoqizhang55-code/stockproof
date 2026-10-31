@@ -8,12 +8,16 @@ check found.** US stocks, China A-shares and Hong Kong. English and 中文.
 ![python](https://img.shields.io/badge/python-3.10%2B-blue) ![license](https://img.shields.io/badge/license-MIT-green)
 · [中文说明](README.zh-CN.md)
 
-**Try it in 30 seconds.** The demo runs offline on bundled real data and needs no API key:
+**Try it offline in 30 seconds** (no API key, no time limit). The demo opens the full dashboard on bundled real
+data; only buttons that need the internet or an AI model are turned off:
 
 ```bash
 pip install "git+https://github.com/taoqizhang55-code/stockproof"
 stockproof demo
 ```
+
+Liked it? The [10-minute tour](#10-minute-tour) takes you from the demo to your own stocks, a backtest and a
+portfolio check-up.
 
 ![Screen and evidence scorecard](docs/images/screen.png)
 
@@ -133,6 +137,26 @@ stockproof dashboard
 ```
 
 Add stocks in the page (`AAPL`, `600519`, `300750`, `00700` …) and click **Refresh news** / **Refresh earnings**.
+
+## 10-minute tour
+
+After [installing](#install) and setting your API key:
+
+1. **Look around the demo (2 min).** `stockproof demo`, then open each tab. The Home tab shows what you can do,
+   with examples to click.
+2. **Your own stocks (3 min).** `stockproof dashboard` → Stocks tab → type a few codes (`AAPL, 600519, 00700`) →
+   **Add** → **Refresh news**, then **Refresh earnings**. The first refresh takes about a minute per stock. Click a
+   row for its news, earnings read and announcements; click **Why?** next to an unusual move.
+3. **Test an idea (2 min).** Lab tab → click a template, e.g. "Buy after big earnings beats, hold 20 days" →
+   **Backtest**. Read the verdict, then change a condition and run it again: the significance bar goes up
+   with each variant you try.
+4. **Check your portfolio (1 min).** Portfolio check-up tab → type your holdings (`600519 100, AAPL 50`) → **Check my
+   portfolio**. The report shows concentration, holdings that move together and how today's weights did in
+   past crashes.
+5. **Ask in plain words (1 min, optional).** `stockproof mcp --install-dsh`, restart DeepSeek Harness, type
+   `/stockproof` or ask "what can you do?".
+6. **Keep it up to date (1 min).** `stockproof schedule --time 21:00` refreshes your watchlist every evening and
+   writes the daily digest (macOS, Windows, Linux).
 
 ## Commands
 
