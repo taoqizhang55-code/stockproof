@@ -93,10 +93,31 @@ DeepSeek 把问题翻译成策略，实验室用十年 A 股数据现场回测�
 
 需要 Python 3.10 以上（A 股和港股需要 3.11 以上）。
 
+Mac、Windows、Linux 都能用，三个系统都有自动测试。
+
 ```bash
 pip install "stockproof[cn,mcp] @ git+https://github.com/taoqizhang55-code/stockproof"
+```
+
+然后设置 API key（默认用 DeepSeek，`stockproof providers` 可以查看其他模型）。只有美股财报需要第二行的联系方式（SEC 要求）。
+
+**Mac / Linux**：把下面两行加到 `~/.zshrc`（或 `~/.bashrc`）里，这样会一直有效，然后重新打开终端：
+
+```bash
 export DEEPSEEK_API_KEY="sk-..."
-export STOCKPROOF_SEC_CONTACT="你的名字 you@example.com"   # 只有美股财报需要（SEC 要求）
+export STOCKPROOF_SEC_CONTACT="你的名字 you@example.com"
+```
+
+**Windows**：在 PowerShell 里运行（会为当前用户保存，之后重新打开窗口）：
+
+```powershell
+setx DEEPSEEK_API_KEY "sk-..."
+setx STOCKPROOF_SEC_CONTACT "你的名字 you@example.com"
+```
+
+最后打开网页看板：
+
+```bash
 stockproof dashboard
 ```
 

@@ -103,10 +103,32 @@ evidence faster**. It does not hand you a trading signal, and the app says this 
 
 Python 3.10+ (3.11+ for China markets).
 
+Works on macOS, Windows and Linux (tested on all three in CI).
+
 ```bash
 pip install "stockproof[cn,mcp] @ git+https://github.com/taoqizhang55-code/stockproof"
-export DEEPSEEK_API_KEY="sk-..."                              # or another provider: stockproof providers
-export STOCKPROOF_SEC_CONTACT="Your Name you@example.com"     # US earnings: SEC asks for a contact
+```
+
+Then give it an API key (DeepSeek by default; `stockproof providers` lists the others). US earnings also need a
+contact for the SEC.
+
+**macOS / Linux** — add to `~/.zshrc` (or `~/.bashrc`) so it is kept, then open a new terminal:
+
+```bash
+export DEEPSEEK_API_KEY="sk-..."
+export STOCKPROOF_SEC_CONTACT="Your Name you@example.com"
+```
+
+**Windows** — in PowerShell (saved for your user; open a new window afterwards):
+
+```powershell
+setx DEEPSEEK_API_KEY "sk-..."
+setx STOCKPROOF_SEC_CONTACT "Your Name you@example.com"
+```
+
+Then start the dashboard:
+
+```bash
 stockproof dashboard
 ```
 
