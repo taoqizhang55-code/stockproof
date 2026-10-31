@@ -36,7 +36,7 @@ def test_digest_sections_and_opening(tmp_path):
     assert [a["art_code"] for a in data["anns"]] == ["A1"]
     assert "问询函" in seen[-1] and "ONLY facts" in seen[-1]
     page = open(out["path"], encoding="utf-8").read()
-    assert "今日要点" in page and "问询函" in page and "异动" in page
+    assert "要点" in page and "问询函" in page and "异动" in page
     assert out["summary"].startswith("1 只异动")
     assert digest.list_dates(d) == [today]
     # without an LLM key it still works, just without the opening and explanations

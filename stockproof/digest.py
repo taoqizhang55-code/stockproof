@@ -30,7 +30,7 @@ TEXT = {
            "note": "Built from saved data; the opening was written by AI from the items below only. Not investment advice.",
            "notify": "{moves} unusual moves · {anns} important announcements · {earn} new reports",
            "no_explain": "No explanation yet (needs an LLM key).", "stocks": "{n} stocks"},
-    "zh": {"title": "stockproof · 每日简报", "highlights": "今日要点", "moves": "异动", "anns": "重要公告",
+    "zh": {"title": "stockproof · 每日简报", "highlights": "要点", "moves": "异动", "anns": "重要公告",
            "earnings": "新发布的财报", "calendar": "即将发布财报", "mood": "新闻情绪最强/最弱",
            "none": "今天没有特别的事。", "why": "原因", "tone": "语气", "vs": "相对大盘", "few": "新闻较少",
            "note": "根据已保存的数据生成；开头的要点由 AI 仅根据下面列出的内容撰写。不构成投资建议。",
@@ -78,7 +78,7 @@ def collect(app, lang: str, client=None, model_id: str | None = None, explain_to
 def _items_for_llm(d: dict) -> list[str]:
     out = []
     for m in d["moves"]:
-        out.append(f"move: {m['ticker']} {m['name']} {quotes.fmt_pct(m['ret'])} (vs market {quotes.fmt_pct(m['excess'])})"
+        out.append(f"move on {m.get('day')}: {m['ticker']} {m['name']} {quotes.fmt_pct(m['ret'])} (vs market {quotes.fmt_pct(m['excess'])})"
                    + (f" — {m['why']}" if m.get("why") else ""))
     for a in d["anns"]:
         out.append(f"announcement: {a['ticker']} {a['name']} [{a['category_name']}] {a['title']}"
@@ -97,10 +97,11 @@ def highlights(client, d: dict) -> str | None:
     language = "Simplified Chinese" if d["lang"] == "zh" else "English"
     lines = "\n".join(f"[{i}] {t}" for i, t in enumerate(items, 1))
     data = client.chat_json(
-        "Write the opening of an investor's daily digest about the stocks they follow.\n"
+        f"Write the opening of an investor's daily digest about the stocks they follow. The digest date is {d['date']}.\n"
         f"Items (the ONLY facts you may use):\n{lines}\n\n"
         f"Write 3-4 short sentences in {language}: the most important things first, cite items like [2]. "
-        "No advice, no predictions, no facts that are not in the items.\n"
+        "No advice, no predictions, no facts that are not in the items. Moves happened on the trading day given in "
+        "each item: name that day (e.g. 'on 10-29' / '10月29日'), and do not call it 'today' unless it is the digest date.\n"
         'Reply ONLY with JSON: {"text": "..."}')
     return str(data.get("text", ""))[:900] or None
 
