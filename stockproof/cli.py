@@ -776,7 +776,12 @@ def cmd_lab(args) -> int:
             ann, t = r.get("ann_excess"), r.get("t")
             if ann is not None:
                 print(f"  excess {100 * ann:+.2f}%/yr · t={t:.2f}")
-            print(f"  {r['verdict']['text']}\n  id {r['id']}\n  report: {r['report']}")
+            print(f"  {r['verdict']['text']}")
+            for key in ("stress", "walk_forward"):
+                x = r.get(key) or {}
+                if x.get("text") and x["text"] not in r["verdict"].get("warnings", []):
+                    print(("  ! " if x.get("code") in ("fragile", "fades") else "  - ") + x["text"])
+            print(f"  id {r['id']}\n  report: {r['report']}")
             if args.open:
                 webbrowser.open("file://" + os.path.abspath(r["report"]))
         elif args.action == "list":

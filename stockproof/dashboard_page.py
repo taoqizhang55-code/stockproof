@@ -1036,6 +1036,8 @@ function labResultHTML(r) {
     <div class="histbox" style="border-left-color:${good ? "var(--pos)" : "var(--neg)"}"><p>${esc(v.text || "")}</p></div>
     <div class="grid">${kpi(tr("d_lab_k_ann"), pctChip(r.ann_excess))}${kpi("t", num(r.t, 1, false))}${kpi(tr("d_lab_k_trades"), r.trades)}
     ${kpi(tr("d_lab_k_win"), r.per_trade && r.per_trade.win !== null && r.per_trade.win !== undefined ? Math.round(100 * r.per_trade.win) + "%" : "—")}</div>`;
+  const rob = [r.stress, r.walk_forward].filter((x) => x && x.text && !(v.warnings || []).includes(x.text));
+  if (rob.length) h += rob.map((x) => `<p class="note" style="color:${["fragile", "fades"].includes(x.code) ? "var(--neg)" : "inherit"}">${["fragile", "fades"].includes(x.code) ? "⚠ " : "✓ "}${esc(x.text)}</p>`).join("");
   if ((r.years || []).length) h += `<p class="note">${r.years.map((y) => `${y.year}: ${y.excess === null ? "—" : (y.excess > 0 ? "+" : "") + (100 * y.excess).toFixed(1) + "%"}`).join(" · ")}</p>`;
   h += `<div class="toolbar"><a class="btn primary" href="${esc(r.report_url)}" target="_blank" rel="noopener">${esc(tr("d_lab_open"))}</a>`;
   if (r.phase === "explore" && v.code === "passes") h += `<button class="btn" data-confirm="${esc(r.id)}">${esc(tr("d_lab_confirm"))}</button>`;

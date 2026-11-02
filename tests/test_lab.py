@@ -199,3 +199,33 @@ def test_custom_screen(tmp_path, monkeypatch):
     assert r["matched"] > 0 and all(x["cap"] >= 100 and x["pe"] < 40 for x in r["results"])
     with pytest.raises(lab.SpecError):
         lab.custom_screen(str(tmp_path), [{"field": "magic", "op": ">", "value": 1}])
+
+
+def test_cost_stress_and_walk_forward(tmp_path):
+    d = _setup(tmp_path)
+    r = lab.explore(d, SPEC, "zh", log=lambda *a: None)
+    st, wf = r["stress"], r["walk_forward"]
+    # doubling costs lowers the excess but a strong planted drift survives
+    assert st["mult"] == 2.0 and st["ann"] < r["ann_excess"]
+    assert st["code"] == "robust" and "×2" in st["text"]
+    # one variant: walk-forward is the rule itself year by year after the warm-up
+    assert wf["variants"] == 1 and wf["code"] == "holds"
+    assert len(wf["years"]) >= 3 and wf["years"][0]["year"] >= int(r["years"][0]["year"]) + lab.WF_WARMUP
+    assert all(y["year"] < int(r["holdout_start"][:4]) + 1 for y in wf["years"])
+    html = open(r["report"], encoding="utf-8").read()
+    assert "滚动向前" in html and "成本×2" in html
+    # more variants: the walk-forward picks among them using only earlier years
+    r2 = lab.explore(d, {**SPEC, "filters": [{"field": "sue", "op": "<=", "value": -2}]}, "en", log=lambda *a: None)
+    assert r2["walk_forward"]["variants"] == 2 and r2["walk_forward"]["in_sample_best"] is not None
+
+
+def test_scaled_costs_and_fragile_flag():
+    c1, c2 = lab.scaled_costs("cn", 1.0), lab.scaled_costs("cn", 2.0)
+    assert c2.buy("2020-01-02") == pytest.approx(2 * c1.buy("2020-01-02"))
+    assert c2.sell("2024-01-02") == pytest.approx(2 * c1.sell("2024-01-02"))
+    mk = lambda ann, t: {"summary": {"long_excess": {"ann_return": ann, "t": t}}}
+    st = lab.stress(mk(0.01, 2.5), mk(-0.002, -0.3), "zh")
+    assert st["code"] == "fragile" and "脆弱" in st["text"]
+    v = lab._warn({"code": "passes", "text": "ok"}, st, None, "zh")
+    assert v["warnings"] and "脆弱" in v["text"]
+    assert lab._warn({"code": "no_edge", "text": "x"}, st, None, "zh")["warnings"] == []

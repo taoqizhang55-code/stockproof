@@ -9,6 +9,11 @@ frictions and writes an illustrated report. Two guards against fooling yourself 
   * Counting tries. Every explored variant is logged. The more variants were tried, the higher the bar
     for calling a result significant (Bonferroni on the daily excess-return t-statistic), and the
     report says so in plain words.
+  * 2x cost stress. Every run is repeated with all trading costs doubled; a strategy whose edge is gone
+    at 2x costs is flagged "fragile" (practitioners' rule: budget twice the fees you expect).
+  * Walk-forward. Picking the best of many variants is itself fitting. Each year, using only the years
+    before it, the lab picks the best of the variants you tried for this question and records how that
+    pick did in the next year. The stitched out-of-sample years are compared with the in-sample best.
 
 Strategy types
   earnings   A-share (CSI 300) or US quarterly reports: filter on SUE, the reaction, the LLM's tone,
@@ -24,6 +29,7 @@ equal-weighted average of the same stocks, so the excess return is the meaningfu
 
 from __future__ import annotations
 
+import dataclasses
 import datetime as dt
 import hashlib
 import json
@@ -37,6 +43,9 @@ import pandas as pd
 from stockproof import clock
 
 HOLDOUT_YEARS = 2
+STRESS_MULT = 2.0          # cost stress test: every cost doubled
+WF_WARMUP = 2              # walk-forward: years of history before the first out-of-sample year
+WF_MAX_VARIANTS = 12
 TYPES = ("earnings", "forecast", "policy", "factor")
 OPS = {">=": lambda s, v: s >= v, "<=": lambda s, v: s <= v, ">": lambda s, v: s > v, "<": lambda s, v: s < v,
        "==": lambda s, v: s == v, "!=": lambda s, v: s != v,
@@ -346,8 +355,18 @@ def apply_filters(ev: pd.DataFrame, filters: list[dict]) -> pd.DataFrame:
 
 # ---------------------------------------------------------------- running
 
+def scaled_costs(market: str, mult: float = 1.0):
+    """The market's trading costs with every component multiplied by `mult`."""
+    from stockproof.backtest import COSTS, Costs
+    c = COSTS.get(market, Costs())
+    if mult == 1.0:
+        return c
+    return dataclasses.replace(c, commission=c.commission * mult, slippage=c.slippage * mult,
+                               stamp_duty=c.stamp_duty * mult, stamp_duty_after=c.stamp_duty_after * mult)
+
+
 def _stock_backtest(ev: pd.DataFrame, prices: pd.DataFrame, market: str, spec: dict,
-                    start: pd.Timestamp | None, end: pd.Timestamp | None) -> dict:
+                    start: pd.Timestamp | None, end: pd.Timestamp | None, cost_mult: float = 1.0) -> dict:
     from stockproof import backtest as bt
     px = prices
     if start is not None:
@@ -357,7 +376,7 @@ def _stock_backtest(ev: pd.DataFrame, prices: pd.DataFrame, market: str, spec: d
     ev = ev.copy()
     ev["sue"] = 1.0                                            # every selected event is a long signal
     run = bt.run(ev, px, market, long_sue=0.5, short_sue=-1e9, hold=spec["hold_days"],
-                 slots=spec["slots"], entry_lag=spec["entry_lag"])
+                 slots=spec["slots"], entry_lag=spec["entry_lag"], costs=scaled_costs(market, cost_mult))
     s = bt.summarize(run)
     trades = run["trades"]
     per = []
@@ -423,7 +442,7 @@ def _policy_backtest(ev: pd.DataFrame, px: pd.DataFrame, spec: dict, start, end,
     return {"summary": summ, "trades": per, "excess": excess, "n": pd.Series(n, index=days)}
 
 
-def _factor_backtest(data_dir: str, spec: dict, start, end) -> dict:
+def _factor_backtest(data_dir: str, spec: dict, start, end, cost_mult: float = 1.0) -> dict:
     from stockproof import screener
     from stockproof import cn
     prices = stock_prices(data_dir, "cn")
@@ -435,7 +454,7 @@ def _factor_backtest(data_dir: str, spec: dict, start, end) -> dict:
     if end is not None:
         px = px[px.index < end]
     s0 = (start or pd.Timestamp("2016-01-01")).date().isoformat()
-    res = screener.backtest(pan, px, spec["top"], spec["factors"], start=s0)
+    res = screener.backtest(pan, px, spec["top"], spec["factors"], start=s0, cost_per_side=0.0015 * cost_mult)
     if not res.get("n"):
         return {"summary": {"n_trades": 0}, "trades": [], "excess": pd.Series(dtype=float), "n": pd.Series(dtype=float)}
     per = [{"ticker": f"{p['picks']} stocks", "entry": p["date"], "exit": "", "excess": p["return"] - p["market"]}
@@ -449,8 +468,9 @@ def _factor_backtest(data_dir: str, spec: dict, start, end) -> dict:
     return {"summary": summ, "trades": per, "excess": None, "n": None, "periods": res["periods"]}
 
 
-def run_spec(data_dir: str, spec: dict, phase: str = "explore", log=print) -> dict:
-    """Run a validated spec on the explore period (before the holdout) or the holdout."""
+def run_spec(data_dir: str, spec: dict, phase: str = "explore", log=print, cost_mult: float = 1.0) -> dict:
+    """Run a validated spec on the explore period (before the holdout) or the holdout.
+    `cost_mult` scales every trading cost (2.0 = the stress test)."""
     spec = validate(spec)
     h0 = holdout_start()
     start, end = (None, h0) if phase == "explore" else (h0, None)
@@ -474,7 +494,7 @@ def run_spec(data_dir: str, spec: dict, phase: str = "explore", log=print) -> di
         sel = sel[(sel["day0"] < end) if end is not None else (sel["day0"] >= start)]
         universe = (f"{prices.shape[1]} stocks in the research price file "
                     f"({'today’s CSI 300 members' if market == 'cn' else 'US large caps'})")
-        res = _stock_backtest(sel, prices, market, spec, start, end)
+        res = _stock_backtest(sel, prices, market, spec, start, end, cost_mult)
         n_events = len(sel)
     elif t == "policy":
         from stockproof import policy
@@ -488,10 +508,10 @@ def run_spec(data_dir: str, spec: dict, phase: str = "explore", log=print) -> di
         sel = _policy_filter(sig, spec["filters"])
         sel = sel[(sel["day"] < end) if end is not None else (sel["day"] >= start)]
         universe = "31 Shenwan level-1 industry indices (benchmark: their equal-weighted average)"
-        res = _policy_backtest(sel, px, spec, start, end)
+        res = _policy_backtest(sel, px, spec, start, end, cost_per_side=0.001 * cost_mult)
         n_events = len(sel)
     else:
-        res = _factor_backtest(data_dir, spec, start, end)
+        res = _factor_backtest(data_dir, spec, start, end, cost_mult)
         n_events = res["summary"].get("n_trades", 0)
         universe = "today’s CSI 300 members with prices; rebalanced early May / Sep / Nov after report deadlines"
     return {"spec": spec, "phase": phase, "holdout_start": h0.date().isoformat(), "universe": universe,
@@ -597,6 +617,139 @@ def _append(data_dir: str, rec: dict) -> None:
 
 # ---------------------------------------------------------------- the public entry points
 
+# ---------------------------------------------------------------- robustness: 2x costs, walk-forward
+
+def _le(res: dict) -> tuple[float | None, float | None]:
+    le = res["summary"].get("long_excess") or {}
+    t, ann = le.get("t"), le.get("ann_return")
+    return (None if ann is None or ann != ann else float(ann)), (None if t is None or t != t else float(t))
+
+
+def stress(base: dict, stressed: dict, lang: str = "zh") -> dict:
+    """Compare a run with the same run at STRESS_MULT x costs."""
+    zh = lang == "zh"
+    a1, t1 = _le(base)
+    a2, t2 = _le(stressed)
+    m = f"{STRESS_MULT:g}"
+    if a2 is None or t2 is None:
+        return {"code": "n/a", "mult": STRESS_MULT, "ann": None, "t": None, "text": ""}
+    if a1 is not None and a1 > 0 and a2 <= 0:
+        code = "fragile"
+        text = (f"脆弱：成本×{m}（佣金、滑点、印花税都翻倍）后每年超额变成 {100 * a2:+.1f}%（t={t2:.1f}）。"
+                f"真实交易的滑点常比假设大，这点优势很可能被吃掉。" if zh else
+                f"Fragile: with every cost x{m} (commission, slippage, stamp duty) the excess becomes "
+                f"{100 * a2:+.1f}%/yr (t={t2:.1f}). Real slippage is often worse than assumed; this edge may not survive.")
+    elif a2 > 0 and t2 >= 2:
+        code = "robust"
+        text = (f"成本×{m} 后仍有每年 {100 * a2:+.1f}% 超额（t={t2:.1f}），对交易成本不敏感。" if zh else
+                f"Still {100 * a2:+.1f}%/yr (t={t2:.1f}) with every cost x{m}: not sensitive to trading costs.")
+    else:
+        code = "weak" if a1 is not None and a1 > 0 else "no_edge"
+        text = (f"成本×{m} 后每年超额 {100 * a2:+.1f}%（t={t2:.1f}）。" if zh else
+                f"With every cost x{m}: {100 * a2:+.1f}%/yr (t={t2:.1f}).")
+    return {"code": code, "mult": STRESS_MULT, "ann": a2, "t": t2, "text": text}
+
+
+def yearly_excess(res: dict) -> dict[int, float]:
+    years = res["summary"].get("years")
+    if not isinstance(years, pd.DataFrame) or not len(years):
+        return {}
+    return {int(i): float(r.iloc[0]) for i, r in years.iterrows() if not pd.isna(r.iloc[0])}
+
+
+def _variants(data_dir: str, spec: dict) -> list[dict]:
+    """This spec plus the other variants explored for the same question (same type and market), newest first."""
+    since = _since_reset(data_dir)
+    seen, out = {spec_hash(spec)}, [spec]
+    for r in reversed(trials(data_dir)):
+        sp = r.get("spec") or {}
+        if r.get("phase") != "explore" or (since and r.get("time", "") <= since) or r.get("hash") in seen:
+            continue
+        if sp.get("type") != spec["type"] or sp.get("market") != spec.get("market"):
+            continue
+        seen.add(r["hash"])
+        out.append(sp)
+        if len(out) >= WF_MAX_VARIANTS:
+            break
+    return out
+
+
+def walk_forward(data_dir: str, spec: dict, lang: str = "zh", base: dict | None = None) -> dict:
+    """Each year Y, pick the variant with the best average excess over the years before Y (at least
+    WF_WARMUP of them), and record what that pick earned in Y. Only the explore period is used."""
+    zh = lang == "zh"
+    h_main = spec_hash(spec)
+    table = {}
+    for sp in _variants(data_dir, spec):
+        h = spec_hash(sp)
+        key = ("wf", data_dir, h, dt.date.today().isoformat())
+        if key not in _CACHE:
+            try:
+                r = base if base is not None and h == h_main else run_spec(data_dir, sp, "explore", log=lambda *a: None)
+                _CACHE[key] = yearly_excess(r)
+            except SpecError:
+                _CACHE[key] = {}
+        table[h] = (sp, _CACHE[key])
+    years = sorted({y for _, ys in table.values() for y in ys})
+    rows = []
+    for Y in years:
+        best, score = None, None
+        for h, (sp, ys) in table.items():
+            past = [ys[y] for y in years if y < Y and y in ys]
+            if len(past) < WF_WARMUP or Y not in ys:
+                continue
+            sc = float(np.mean(past))
+            if score is None or sc > score:
+                best, score = h, sc
+        if best is not None:
+            rows.append({"year": Y, "pick": describe_spec(table[best][0], lang), "pick_is_this": best == h_main,
+                         "past_mean": score, "excess": table[best][1][Y]})
+    k = len(table)
+    out = {"variants": k, "years": rows, "warmup": WF_WARMUP}
+    if len(rows) < 2:
+        out.update(code="too_short", mean=None, positive=None, in_sample_best=None,
+                   text=(f"历史太短，做不了滚动向前验证（需要至少 {WF_WARMUP + 2} 年有交易）。" if zh else
+                         f"Too little history for a walk-forward test (needs {WF_WARMUP + 2}+ years with trades)."))
+        return out
+    test_years = [r["year"] for r in rows]
+    oos = float(np.mean([r["excess"] for r in rows]))
+    pos = sum(r["excess"] > 0 for r in rows)
+    # the variant that looks best with hindsight, over the same years
+    ins = max(float(np.mean([ys.get(y, 0.0) for y in test_years])) for _, ys in table.values() if ys)
+    how = (f"每年年初只用之前的数据，从你为这个问题试过的 {k} 个版本里挑出当时最好的，再看它下一年的表现"
+           if k > 1 else "目前只试了 1 个版本，所以就是从第 3 年起逐年检验它本身") if zh else \
+          (f"each year, using only earlier years, the best of the {k} variants you tried was picked and its next year recorded"
+           if k > 1 else "only 1 variant tried, so this is the rule itself year by year after a warm-up")
+    code = "holds" if oos > 0 and pos * 2 >= len(rows) else "fades"
+    if zh:
+        text = (f"滚动向前验证（{how}）：{len(rows)} 个样本外年份平均每年 {100 * oos:+.1f}%，{pos}/{len(rows)} 年为正")
+        text += (f"；事后看最好的版本同期平均 {100 * ins:+.1f}%。" if k > 1 else "。")
+        if code == "fades":
+            text += "优势没能延续到下一年，样本内的好结果很可能是挑出来的。"
+    else:
+        text = (f"Walk-forward ({how}): {len(rows)} out-of-sample years average {100 * oos:+.1f}%/yr, "
+                f"{pos}/{len(rows)} positive")
+        text += (f"; the hindsight-best variant averaged {100 * ins:+.1f}% over the same years." if k > 1 else ".")
+        if code == "fades":
+            text += " The edge did not carry into the next year; the in-sample result was likely picked, not real."
+    out.update(code=code, mean=oos, positive=pos, in_sample_best=ins, gap=ins - oos, text=text)
+    return out
+
+
+def _warn(v: dict, st: dict | None, wf: dict | None, lang: str) -> dict:
+    """Attach robustness warnings to a passing verdict."""
+    v["warnings"] = []
+    if v["code"] not in ("passes", "confirmed"):
+        return v
+    if st and st.get("code") == "fragile":
+        v["warnings"].append(st["text"])
+    if wf and wf.get("code") == "fades":
+        v["warnings"].append(wf["text"])
+    if v["warnings"]:
+        v["text"] += (" 但要注意：" if lang == "zh" else " But: ") + " ".join(v["warnings"])
+    return v
+
+
 def verdict(res: dict, tries: int, lang: str = "zh") -> dict:
     zh = lang == "zh"
     le = res["summary"].get("long_excess") or {}
@@ -649,15 +802,18 @@ def explore(data_dir: str, spec: dict, lang: str = "zh", log=print) -> dict:
     spec = validate(spec)
     h = spec_hash(spec)
     res = run_spec(data_dir, spec, "explore", log=log)
+    st = stress(res, run_spec(data_dir, spec, "explore", log=lambda *a: None, cost_mult=STRESS_MULT), lang)
+    wf = walk_forward(data_dir, spec, lang, base=res)
     since = _since_reset(data_dir)
     known = {r["hash"] for r in trials(data_dir) if r.get("phase") == "explore" and (not since or r["time"] > since)}
     tries = len(known | {h})
-    v = verdict(res, tries, lang)
+    v = _warn(verdict(res, tries, lang), st, wf, lang)
     exp_id = f"{dt.datetime.now():%Y%m%d-%H%M%S}-{h[:6]}"
-    out = _package(data_dir, exp_id, h, res, v, lang)
+    out = _package(data_dir, exp_id, h, res, v, lang, {"stress": st, "walk_forward": wf})
     _append(data_dir, {"id": exp_id, "hash": h, "phase": "explore", "time": dt.datetime.now().isoformat(timespec="microseconds"),
                        "spec": spec, "t": v["t"], "ann": (res["summary"].get("long_excess") or {}).get("ann_return"),
-                       "n": res["summary"].get("n_trades", 0), "verdict": v["code"]})
+                       "n": res["summary"].get("n_trades", 0), "verdict": v["code"],
+                       "stress": st["code"], "walk_forward": wf["code"]})
     return out
 
 
@@ -672,9 +828,10 @@ def confirm(data_dir: str, exp_id: str, lang: str = "zh", log=print) -> dict:
                         f"Result then: {done[0].get('verdict')}")
     res = run_spec(data_dir, rec["spec"], "confirm", log=log)
     res["explore_t"] = rec.get("t")
-    v = verdict(res, 1, lang)
+    st = stress(res, run_spec(data_dir, rec["spec"], "confirm", log=lambda *a: None, cost_mult=STRESS_MULT), lang)
+    v = _warn(verdict(res, 1, lang), st, None, lang)
     cid = f"{exp_id}-holdout"
-    out = _package(data_dir, cid, rec["hash"], res, v, lang)
+    out = _package(data_dir, cid, rec["hash"], res, v, lang, {"stress": st})
     _append(data_dir, {"id": cid, "hash": rec["hash"], "phase": "confirm", "of": exp_id,
                        "time": dt.datetime.now().isoformat(timespec="microseconds"), "spec": rec["spec"], "t": v["t"],
                        "ann": (res["summary"].get("long_excess") or {}).get("ann_return"),
@@ -682,7 +839,7 @@ def confirm(data_dir: str, exp_id: str, lang: str = "zh", log=print) -> dict:
     return out
 
 
-def _package(data_dir: str, exp_id: str, h: str, res: dict, v: dict, lang: str) -> dict:
+def _package(data_dir: str, exp_id: str, h: str, res: dict, v: dict, lang: str, extra: dict | None = None) -> dict:
     from stockproof import lab_report
     s = res["summary"]
     le = s.get("long_excess") or {}
@@ -705,7 +862,7 @@ def _package(data_dir: str, exp_id: str, h: str, res: dict, v: dict, lang: str) 
            "trades": s.get("n_trades", 0), "avg_positions": s.get("avg_positions"),
            "ann_excess": le.get("ann_return"), "t": le.get("t"), "sharpe": le.get("sharpe"), "max_dd": le.get("max_dd"),
            "per_trade": s.get("long_trade"), "years": ylist,
-           "worst_trades": trades[:5], "best_trades": trades[-5:][::-1], "verdict": v}
+           "worst_trades": trades[:5], "best_trades": trades[-5:][::-1], "verdict": v, **(extra or {})}
     html = lab_report.build(out, res, lang)
     path = os.path.join(lab_dir(data_dir), "reports", f"{exp_id}.html")
     with open(path, "w", encoding="utf-8") as f:

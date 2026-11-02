@@ -26,7 +26,10 @@ T = {
                         "against the equal-weighted average of the same universe. The last {y} years are locked while "
                         "you explore, and every variant you try raises the bar."),
            "caveat": "Large caps only, today's members (survivorship). Research, not investment advice.",
-           "generated": "Generated {time}"},
+           "generated": "Generated {time}",
+           "robust": "Robustness checks", "stress": "Costs x{m}", "stress_ann": "Excess / yr at x{m} costs",
+           "wf": "Walk-forward (out-of-sample years)", "wf_year": "Year", "wf_pick": "Variant picked with data before that year",
+           "wf_ex": "Excess that year", "wf_mean": "Walk-forward excess / yr", "wf_ins": "Hindsight-best variant, same years"},
     "zh": {"title": "量化实验室", "explore": "样本内研究（近期数据已锁定）", "confirm": "样本外检验（只有一次机会）",
            "verdict": "结论", "strategy": "策略", "data": "数据", "period": "区间", "universe": "股票池",
            "events": "信号数", "trades": "交易数", "positions": "平均持仓数", "ann": "每年超额收益",
@@ -39,7 +42,10 @@ T = {
                         "收益相对同一股票池的等权平均来算。研究时最近 {y} 年的数据是锁住的，而且每多试一个版本，"
                         "通过的门槛就更高。"),
            "caveat": "只覆盖大盘股、且是今天的成分股（有幸存者偏差）。仅供研究，不构成投资建议。",
-           "generated": "生成于 {time}"},
+           "generated": "生成于 {time}",
+           "robust": "稳健性检验", "stress": "成本×{m}", "stress_ann": "成本×{m} 后每年超额",
+           "wf": "滚动向前验证（样本外年份）", "wf_year": "年份", "wf_pick": "只用之前数据挑出的版本",
+           "wf_ex": "当年超额", "wf_mean": "滚动向前每年超额", "wf_ins": "事后最好的版本（同期）"},
 }
 
 EXTRA = """
@@ -171,6 +177,29 @@ def build(out: dict, res: dict, lang: str = "zh") -> str:
         sec += [kpi(L["tries"], v["tries"]), kpi(L["need"], _num(v["t_needed"], 1))]
     sec.append("</div>")
     parts.append("<section class='card'>" + "".join(sec) + "</section>")
+
+    st, wf = out.get("stress") or {}, out.get("walk_forward") or {}
+    if st.get("text") or wf.get("text"):
+        m = f"{st.get('mult', 2):g}"
+        rb = [f"<h2>{_e(L['robust'])}</h2><div class='kpis'>"]
+        if st.get("ann") is not None:
+            rb.append(kpi(L["stress_ann"].format(m=m), _pct(st["ann"])))
+        if wf.get("mean") is not None:
+            rb.append(kpi(L["wf_mean"], _pct(wf["mean"])))
+            if wf.get("variants", 1) > 1:
+                rb.append(kpi(L["wf_ins"], _pct(wf.get("in_sample_best"))))
+        rb.append("</div>")
+        for x in (st, wf):
+            if x.get("text"):
+                bad = x.get("code") in ("fragile", "fades")
+                rb.append(f"<div class='verdict {'no_edge' if bad else 'passes'}' style='margin-top:10px'>{_e(x['text'])}</div>")
+        if wf.get("years"):
+            rb.append(f"<h3>{_e(L['wf'])}</h3><table><thead><tr><th>{_e(L['wf_year'])}</th><th>{_e(L['wf_pick'])}</th>"
+                      f"<th>{_e(L['wf_ex'])}</th></tr></thead><tbody>" +
+                      "".join(f"<tr><td class='num'>{r['year']}</td><td>{_e(r['pick'])}</td><td><span class='chip "
+                              f"{'positive' if r['excess'] >= 0 else 'negative'}'>{_pct(r['excess'])}</span></td></tr>"
+                              for r in wf["years"]) + "</tbody></table>")
+        parts.append("<section class='card'>" + "".join(rb) + "</section>")
 
     s = res["summary"]
     charts = []

@@ -46,7 +46,10 @@ How to use it well:
   if a condition isn't available, say so instead of approximating silently. Report the verdict text as given.
   Every new variant you try is counted and raises the bar; don't tweak parameters until something looks good —
   if you try several variants, tell the user how many and what the multiple-testing verdict says. When a result
-  passes, offer lab_confirm(id): one run on the locked recent years, which can't be repeated. Mention the report
+  passes, offer lab_confirm(id): one run on the locked recent years, which can't be repeated. Every run also returns
+  `stress` (the same test with all costs doubled; "fragile" = the edge dies at 2x costs) and `walk_forward` (each year,
+  the best variant picked using only earlier years, scored on the next year; "fades" = the pick didn't hold up).
+  Report both in plain words; a fragile or fading result is not a strategy to trade. Mention the report
   link (it opens in the browser). Use lab_similar for "what usually happens after a report like this one",
   lab_screen for custom conditions over all A-shares, lab_policy_history for 新闻联播 policy events.
   When you explain WHY a result looks the way it does (crowding, a sector cycle…), say it is a hypothesis
@@ -785,7 +788,8 @@ def build_server(tools: Tools):
         an illustrated report. spec example: {"type": "earnings", "market": "cn", "filters": [{"field": "sue",
         "op": ">=", "value": 2}], "hold_days": 20, "entry_lag": 1}. Types: earnings, forecast (业绩预告), policy
         (新闻联播 signals, trades industry indices), factor (top-N rebalance; give "factors" and "top").
-        Returns excess return, t, trades, years, and a verdict corrected for the number of variants tried."""
+        Returns excess return, t, trades, years, a verdict corrected for the number of variants tried, a 2x cost
+        stress test (`stress`) and a walk-forward check over the variants tried (`walk_forward`)."""
         return tools.lab_backtest(spec, open_report, lang)
 
     @srv.tool()
