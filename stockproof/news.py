@@ -30,8 +30,13 @@ def parse_rss(xml_text: str, source: str, limit: int) -> list[dict]:
             published = parsedate_to_datetime(raw_date).strftime("%Y-%m-%d")
         except Exception:
             published = ""
-        out.append({"title": title, "link": (item.findtext("link") or "").strip(),
-                    "published": published, "source": source})
+        src = item.find("source")             # Google News names the publisher here
+        publisher = (src.text or "").strip() if src is not None else ""
+        it = {"title": title, "link": (item.findtext("link") or "").strip(),
+              "published": published, "source": publisher or source}
+        if src is not None and src.get("url"):
+            it["site"] = src.get("url")
+        out.append(it)
         if len(out) >= limit:
             break
     return out

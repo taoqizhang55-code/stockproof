@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import os
 
 import pandas as pd
 
@@ -209,6 +210,9 @@ def explain(store, client, model_id: str, data_dir: str, ticker: str, day: str |
         if hit:
             return json.loads(hit[0])
     items = evidence(store, ticker, day)
+    if os.environ.get("STOCKPROOF_RESOLVE_LINKS", "1") != "0":
+        from stockproof import links            # cite the publisher, not a news.google.com redirect
+        links.resolve_items(items, data_dir, store=store, budget=10)
     for it in items:
         it["timing"] = _date_label(it["date"], day)
     try:

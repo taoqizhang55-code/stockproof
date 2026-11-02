@@ -324,12 +324,14 @@ class Dashboard:
                 eps_rows.append({"end": q.end, "fiscal": q.fiscal, "eps": q.eps,
                                  "year_ago": q.eps_year_ago, "change": q.change, "sue": q.sue,
                                  "filed": q.filed, "q4": bool(q.q4_derived)})
+        from stockproof import links
+        hl = links.resolve_items([{"title": h.title, "link": h.link, "date": h.date, "source": h.source,
+                                   "relevance": h.relevance, "score": h.score, "reason": h.reason,
+                                   "lang": h.lang, "dup": pd.notna(getattr(h, "duplicate_of", None))}
+                                  for h in heads.itertuples()], self.data_dir, online=False)  # cached/offline only
         return _clean({
             "ticker": tk, "name": self.name_of(tk),
-            "headlines": [{"title": h.title, "link": h.link, "date": h.date, "source": h.source,
-                           "relevance": h.relevance, "score": h.score, "reason": h.reason,
-                           "lang": h.lang, "dup": pd.notna(getattr(h, "duplicate_of", None))}
-                          for h in heads.itertuples()],
+            "headlines": hl,
             "history": [{"date": h.date, "mood": h.mood, "n": h.n} for h in history.itertuples()],
             "earnings": read,
             "report": rep,

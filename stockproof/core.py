@@ -37,6 +37,9 @@ def scan_ticker(store: Store, client: LLMClient, model_id: str, ticker: str, nam
         out["error"] = "no news found (" + "; ".join(problems) + ")"
         return out
     out["headlines"] = len(items)
+    if os.environ.get("STOCKPROOF_RESOLVE_LINKS", "1") != "0":
+        from stockproof import links            # Google News redirects -> the publisher's own URL
+        links.resolve_items(items, os.path.dirname(store.path), store=store, budget=10)
     ids = store.add_headlines(ticker, items)
     todo = store.unscored(ids, model_id, lang)
     out["new"] = len(todo)
