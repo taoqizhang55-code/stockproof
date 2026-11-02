@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS move_explanations (
     PRIMARY KEY (ticker, day, model, lang)
 );
 """
-VERSION = 1
+VERSION = 2                      # 2: attribution table + evidence dated against the move day
 
 
 def evidence(store, ticker: str, day: str, before: int = 3, after: int = 1,
@@ -67,12 +67,102 @@ def evidence(store, ticker: str, day: str, before: int = 3, after: int = 1,
     return sorted(items, key=lambda i: str(i["date"]), reverse=True)
 
 
-def build_prompt(name: str, ticker: str, day: str, move: dict, items: list[dict], lang: str) -> str:
+# ---------------------------------------------------------------- attribution: market / industry / own
+def _industry_code(data_dir: str, ticker: str) -> tuple[str | None, str | None]:
+    """Shenwan level-1 (code, name) for an A-share, from cached data only (no LLM, little network)."""
+    import os
+    from stockproof import policy, screener
+    info = cn.parse(ticker)
+    if not info or info["market"] == "HK":
+        return None, None
+    em = screener.industry_of(data_dir, info["code"])
+    try:
+        with open(os.path.join(policy.policy_dir(data_dir), "industry_map.json"), encoding="utf-8") as f:
+            mp = json.load(f)
+    except (OSError, ValueError):
+        mp = {}
+    sw = mp.get(em) if em else None
+    if sw is None and em in policy.NAME_TO_CODE:
+        sw = em
+    return (policy.NAME_TO_CODE.get(sw), sw) if sw else (None, None)
+
+
+def _industry_series(data_dir: str, code: str, day: pd.Timestamp, fetch: bool = True) -> pd.Series | None:
+    """Daily close of one Shenwan index; topped up from AKShare when the saved file stops before `day`."""
+    import os
+    from stockproof import policy
+    px = policy.load_prices(data_dir)
+    col = f"{code}_c"
+    s = px[col].dropna() if px is not None and col in px else pd.Series(dtype=float)
+    if (s.empty or s.index[-1] < day) and fetch:
+        try:
+            df = cn._ak().index_hist_sw(symbol=code, period="day")
+            new = pd.Series(pd.to_numeric(df["收盘"], errors="coerce").to_numpy(), index=pd.to_datetime(df["日期"]))
+            s = pd.concat([s[~s.index.isin(new.index)], new]).sort_index().dropna()
+            if px is not None:
+                px = px.reindex(px.index.union(s.index))
+                px[col] = s.reindex(px.index)
+                px.to_csv(os.path.join(policy.policy_dir(data_dir), "sw_l1.csv"))
+        except Exception:
+            pass
+    return s if len(s) else None
+
+
+def attribution(data_dir: str, ticker: str, day: str, window: int = 120, fetch: bool = True) -> dict | None:
+    """Split the day's return into market, industry and the stock's own part, using betas estimated
+    on the previous `window` trading days:  ret = a + b_m·market + b_i·(industry − market) + own."""
+    import numpy as np
+    m = quotes.moves(data_dir, ticker)
+    d = pd.Timestamp(day)
+    if m.empty or d not in m.index:
+        return None
+    df = pd.DataFrame({"ret": m["ret"], "mkt": m["market"]})
+    code, sw = _industry_code(data_dir, ticker)
+    ind = _industry_series(data_dir, code, d, fetch) if code else None
+    if ind is not None:
+        df["ind"] = ind.pct_change().reindex(df.index)
+    hist = df[df.index < d].dropna().iloc[-window:]
+    if len(hist) < 30 or pd.isna(df.loc[d, "mkt"]):
+        return None
+    use_ind = "ind" in df and pd.notna(df.loc[d, "ind"]) and hist["ind"].notna().sum() >= 30
+    X = np.column_stack([np.ones(len(hist)), hist["mkt"]] + ([hist["ind"] - hist["mkt"]] if use_ind else []))
+    beta, *_ = np.linalg.lstsq(X, hist["ret"].to_numpy(), rcond=None)
+    r, mk = float(df.loc[d, "ret"]), float(df.loc[d, "mkt"])
+    market_part = float(beta[1] * mk)
+    industry_part = float(beta[2] * (df.loc[d, "ind"] - mk)) if use_ind else None
+    own = r - market_part - (industry_part or 0.0)
+    resid_sd = float(np.std(hist["ret"].to_numpy() - X @ beta, ddof=X.shape[1]))
+    return {"ret": r, "market_ret": mk, "industry": sw if use_ind else None,
+            "industry_ret": float(df.loc[d, "ind"]) if use_ind else None,
+            "beta_market": round(float(beta[1]), 2), "beta_industry": round(float(beta[2]), 2) if use_ind else None,
+            "market_part": market_part, "industry_part": industry_part, "own_part": own,
+            "own_z": round(own / resid_sd, 2) if resid_sd > 0 else None, "window": len(hist),
+            "rule": f"betas from the previous {len(hist)} trading days; own = return − market part − industry part"}
+
+
+def _date_label(item_date: str, day: str) -> str:
+    gap = (pd.Timestamp(day) - pd.Timestamp(str(item_date)[:10])).days
+    return "same_day" if gap <= 0 else ("day_before" if gap == 1 else f"background_{gap}d")
+
+
+def build_prompt(name: str, ticker: str, day: str, move: dict, items: list[dict], lang: str,
+                 attr: dict | None = None) -> str:
     language = "Simplified Chinese" if lang == "zh" else "English"
     lines = []
     for i, it in enumerate(items, 1):
         note = f" — {it['note']}" if it.get("note") else ""
-        lines.append(f"[{i}] {it['date']} {it['kind']}: {it['title']}{note}")
+        lines.append(f"[{i}] {it['date']} ({_date_label(it['date'], day)}) {it['kind']}: {it['title']}{note}")
+    if attr:
+        parts = [f"market part {quotes.fmt_pct(attr['market_part'])} (market {quotes.fmt_pct(attr['market_ret'])}, beta {attr['beta_market']})"]
+        if attr.get("industry_part") is not None:
+            parts.append(f"industry part {quotes.fmt_pct(attr['industry_part'])} ({attr['industry']} index "
+                         f"{quotes.fmt_pct(attr['industry_ret'])})")
+        parts.append(f"stock's own part {quotes.fmt_pct(attr['own_part'])}"
+                     + (f" ({abs(attr['own_z']):.1f}× its usual own move)" if attr.get("own_z") is not None else ""))
+        att = ("Attribution (computed; state these numbers first, exactly as written, do not re-round): "
+               + "; ".join(parts) + ".\n")
+    else:
+        att = ""
     ev = "\n".join(lines) if lines else "(nothing found)"
     return (
         "You are a careful equity analyst explaining a stock's price move to an investor.\n"
@@ -80,11 +170,14 @@ def build_prompt(name: str, ticker: str, day: str, move: dict, items: list[dict]
         f"Move: stock {quotes.fmt_pct(move.get('ret'))}, market {quotes.fmt_pct(move.get('market'))}, "
         f"difference {quotes.fmt_pct(move.get('excess'))}"
         + (f" (about {abs(move['z']):.1f} times this stock's usual daily difference)" if move.get("z") else "")
-        + ".\n\nEvidence published around that day (the ONLY facts you may use):\n" + ev + "\n\n"
+        + ".\n" + att + "\nEvidence published around that day (the ONLY facts you may use):\n" + ev + "\n\n"
         "Rules: use only the evidence above and cite it like [2]. Do not invent news, numbers or reasons. "
         "If the evidence does not explain the move, say so plainly (e.g. no company-specific news was found; "
         "the move may reflect the sector, the market or flows) — that is a valid answer. "
-        "If the market itself moved a lot, mention it.\n"
+        "If the market itself moved a lot, mention it. Start from the attribution: if the market and industry "
+        "parts explain most of the move, say so; then explain only the stock's own part with the evidence. "
+        "Items labelled background_Nd were published N days before the move: they are context, never call them "
+        "news of that day ('当日'/'today').\n"
         "Reply ONLY with JSON:\n"
         f'{{"summary": "2-3 sentences in {language}, with citations like [1]",\n'
         ' "causes": [{"text": "one cause in ' + language + '", "evidence": [1, 3]}],\n'
@@ -116,10 +209,16 @@ def explain(store, client, model_id: str, data_dir: str, ticker: str, day: str |
         if hit:
             return json.loads(hit[0])
     items = evidence(store, ticker, day)
-    out = {"ticker": ticker, "day": day, "move": move, "evidence": items}
+    for it in items:
+        it["timing"] = _date_label(it["date"], day)
+    try:
+        attr = attribution(data_dir, ticker, day)
+    except Exception:
+        attr = None
+    out = {"ticker": ticker, "day": day, "move": move, "attribution": attr, "evidence": items}
     if client is None:
         return out
-    data = client.chat_json(build_prompt(name, ticker, day, move, items, lang))
+    data = client.chat_json(build_prompt(name, ticker, day, move, items, lang, attr))
     valid = set(range(1, len(items) + 1))
     causes = []
     for c in (data.get("causes") or [])[:4]:

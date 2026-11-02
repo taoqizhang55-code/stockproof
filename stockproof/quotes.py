@@ -46,10 +46,40 @@ def market_of(ticker: str) -> str:
     return "HK" if info["market"] == "HK" else "A"
 
 
+COLS = ["close", "open", "high", "low", "volume"]          # close first: older files hold only close
+
+
 def _frame(dates, closes) -> pd.Series:
     s = pd.Series(pd.to_numeric(pd.Series(closes), errors="coerce").to_numpy(),
                   index=pd.to_datetime(pd.Series(dates)), dtype=float).dropna()
     return s[~s.index.duplicated()].sort_index()
+
+
+def _num(x):
+    return pd.to_numeric(pd.Series(x).astype(str).str.replace(r"[$,]", "", regex=True), errors="coerce").to_numpy()
+
+
+def _bars(df: pd.DataFrame, date: str, close: str, open_: str | None = None, high: str | None = None,
+          low: str | None = None, volume: str | None = None) -> pd.DataFrame:
+    """A daily OHLCV frame (close always; the others when the source has them), newest last."""
+    out = pd.DataFrame({"close": _num(df[close])}, index=pd.to_datetime(pd.Series(df[date]).to_numpy()))
+    for name, col in (("open", open_), ("high", high), ("low", low), ("volume", volume)):
+        out[name] = _num(df[col]) if col and col in df.columns else np.nan
+    out = out.dropna(subset=["close"])
+    out = out[~out.index.duplicated()].sort_index()
+    out.index.name = None
+    return out[COLS]
+
+
+def _pick(df, *names):
+    return next((n for n in names if n in df.columns), None)
+
+
+def _std(df: pd.DataFrame) -> pd.DataFrame:
+    """Recognise the usual column names (AKShare Chinese / English, Nasdaq)."""
+    return _bars(df, _col(df, "日期", "date", "Date"), _col(df, "收盘", "close", "Close"),
+                 _pick(df, "开盘", "open", "Open"), _pick(df, "最高", "high", "High"),
+                 _pick(df, "最低", "low", "Low"), _pick(df, "成交量", "volume", "Volume"))
 
 
 def _col(df, *names):
@@ -59,7 +89,7 @@ def _col(df, *names):
     raise KeyError(names)
 
 
-def _nasdaq(sym: str, start: dt.date, assetclass: str = "stocks") -> pd.Series:
+def _nasdaq(sym: str, start: dt.date, assetclass: str = "stocks") -> pd.DataFrame:
     r = requests.get(NASDAQ_HIST.format(sym=sym.replace("-", ".")), headers=NASDAQ_HEADERS, timeout=20,
                      params={"assetclass": assetclass, "fromdate": start.isoformat(),
                              "todate": dt.date.today().isoformat(), "limit": 9999})
@@ -67,79 +97,91 @@ def _nasdaq(sym: str, start: dt.date, assetclass: str = "stocks") -> pd.Series:
     rows = ((((r.json() or {}).get("data") or {}).get("tradesTable") or {}).get("rows")) or []
     if not rows:
         raise ValueError("no rows")
-    return _frame([pd.to_datetime(x["date"], format="%m/%d/%Y") for x in rows],
-                  [str(x.get("close", "")).replace("$", "").replace(",", "") for x in rows])
+    df = pd.DataFrame(rows)
+    df["date"] = [pd.to_datetime(x, format="%m/%d/%Y") for x in df["date"]]
+    return _std(df)
 
 
-def download(ticker: str, start: dt.date) -> pd.Series:
-    """Daily closes from `start`, newest last."""
+def download_bars(ticker: str, start: dt.date) -> pd.DataFrame:
+    """Daily OHLCV from `start`, newest last (forward-adjusted for A/HK/US stocks)."""
     s8 = start.strftime("%Y%m%d")
     if ticker == "^SPX":
         try:
             return _nasdaq("SPX", start, "index")
         except Exception:
-            df = cn._ak().index_us_stock_sina(symbol=".INX")
-            return _frame(df[_col(df, "date")], df[_col(df, "close")]).loc[str(start):]
+            return _std(cn._ak().index_us_stock_sina(symbol=".INX")).loc[str(start):]
     if ticker == "^CSI300":
-        df = cn._ak().stock_zh_index_daily(symbol="sh000300")
-        return _frame(df[_col(df, "date")], df[_col(df, "close")]).loc[str(start):]
+        return _std(cn._ak().stock_zh_index_daily(symbol="sh000300")).loc[str(start):]
     if ticker == "^HSI":
-        df = cn._ak().stock_hk_index_daily_sina(symbol="HSI")
-        return _frame(df[_col(df, "date")], df[_col(df, "close")]).loc[str(start):]
+        return _std(cn._ak().stock_hk_index_daily_sina(symbol="HSI")).loc[str(start):]
     info = cn.parse(ticker)
     if info and info["market"] == "HK":
         try:
-            df = cn._ak().stock_hk_hist(symbol=info["code"], period="daily", start_date=s8, end_date="22220101",
-                                        adjust="qfq")
-            return _frame(df[_col(df, "日期")], df[_col(df, "收盘")])
+            return _std(cn._ak().stock_hk_hist(symbol=info["code"], period="daily", start_date=s8,
+                                               end_date="22220101", adjust="qfq"))
         except Exception:                                   # Eastmoney refused: Sina has HK history too
-            df = cn._ak().stock_hk_daily(symbol=info["code"], adjust="qfq")
-            return _frame(df[_col(df, "date")], df[_col(df, "close")]).loc[str(start):]
+            return _std(cn._ak().stock_hk_daily(symbol=info["code"], adjust="qfq")).loc[str(start):]
     if info:
         try:
-            df = cn._ak().stock_zh_a_hist(symbol=info["code"], period="daily", start_date=s8,
-                                          end_date="20500101", adjust="qfq")
-            return _frame(df[_col(df, "日期")], df[_col(df, "收盘")])
+            return _std(cn._ak().stock_zh_a_hist(symbol=info["code"], period="daily", start_date=s8,
+                                                 end_date="20500101", adjust="qfq"))
         except Exception:
             prefix = {"SH": "sh", "SZ": "sz", "BJ": "bj"}[info["market"]]
-            df = cn._ak().stock_zh_a_daily(symbol=prefix + info["code"], start_date=s8, end_date="20500101",
-                                           adjust="qfq")
-            return _frame(df[_col(df, "date")], df[_col(df, "close")])
+            return _std(cn._ak().stock_zh_a_daily(symbol=prefix + info["code"], start_date=s8, end_date="20500101",
+                                                  adjust="qfq"))
     try:
         return _nasdaq(ticker, start)
     except Exception:
-        df = cn._ak().stock_us_daily(symbol=ticker.replace("-", "."), adjust="qfq")
-        return _frame(df[_col(df, "date")], df[_col(df, "close")]).loc[str(start):]
+        return _std(cn._ak().stock_us_daily(symbol=ticker.replace("-", "."), adjust="qfq")).loc[str(start):]
+
+
+def download(ticker: str, start: dt.date) -> pd.Series:
+    """Daily closes from `start`, newest last."""
+    return download_bars(ticker, start)["close"]
 
 
 def _path(data_dir: str, ticker: str) -> str:
     return os.path.join(data_dir, "quotes", ticker.replace("^", "_") + ".csv")
 
 
-def load(data_dir: str, ticker: str) -> pd.Series:
+def load_bars(data_dir: str, ticker: str) -> pd.DataFrame:
+    """Saved OHLCV (open/high/low/volume are NaN in files saved before 0.4: only closes were kept)."""
     p = _path(data_dir, ticker)
     if not os.path.exists(p):
-        return pd.Series(dtype=float)
+        return pd.DataFrame(columns=COLS, dtype=float)
     df = pd.read_csv(p, index_col=0, parse_dates=True)
-    return df.iloc[:, 0].astype(float)
+    if "close" not in df.columns:
+        df = df.rename(columns={df.columns[0]: "close"})
+    for c in COLS:
+        if c not in df.columns:
+            df[c] = np.nan
+    return df[COLS].astype(float)
+
+
+def load(data_dir: str, ticker: str) -> pd.Series:
+    return load_bars(data_dir, ticker)["close"]
 
 
 def update(data_dir: str, ticker: str, years: float = 2.0) -> pd.Series:
-    """Top up the saved series. Forward-adjusted prices change when a dividend is paid, so the last
-    ~2 years are re-downloaded when the new data doesn't line up with the saved data."""
-    old = load(data_dir, ticker)
+    """Top up the saved bars. Forward-adjusted prices change when a dividend is paid, so the last
+    ~2 years are re-downloaded when the new data doesn't line up with the saved data, or when the
+    saved file has no open/high/low yet (files from before 0.4)."""
+    old = load_bars(data_dir, ticker)
     today = dt.date.today()
-    start = (today - dt.timedelta(days=int(365 * years))) if old.empty else (old.index[-1].date() - dt.timedelta(days=10))
-    new = download(ticker, start)
+    full = today - dt.timedelta(days=int(365 * years))
+    if not old.empty and old["high"].notna().sum() == 0:
+        old = old.iloc[0:0]                                  # closes only: fetch full bars once
+    start = full if old.empty else (old.index[-1].date() - dt.timedelta(days=10))
+    new = download_bars(ticker, start)
     if not old.empty and len(new):
         overlap = old.index.intersection(new.index)
-        if len(overlap) and not np.allclose(old.loc[overlap], new.loc[overlap], rtol=1e-4):
-            new = download(ticker, today - dt.timedelta(days=int(365 * years)))     # re-adjusted
-            old = pd.Series(dtype=float)
-    s = pd.concat([old[~old.index.isin(new.index)], new]).sort_index() if not old.empty else new
+        if len(overlap) and not np.allclose(old.loc[overlap, "close"], new.loc[overlap, "close"], rtol=1e-4):
+            new = download_bars(ticker, full)                # re-adjusted
+            old = old.iloc[0:0]
+    df = pd.concat([old[~old.index.isin(new.index)], new]).sort_index() if not old.empty else new
     os.makedirs(os.path.dirname(_path(data_dir, ticker)), exist_ok=True)
-    s.rename("close").to_frame().to_csv(_path(data_dir, ticker))
-    return s
+    df[COLS].to_csv(_path(data_dir, ticker))
+    return df["close"]
 
 
 def refresh(data_dir: str, tickers: list[str], log=print) -> dict:

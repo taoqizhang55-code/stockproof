@@ -229,8 +229,8 @@ BODY = """
 JS = r"""
 const $ = (s) => document.querySelector(s);
 let SC = null, scSelected = null;
-let T = {}, S = null, rows = [], selected = null, sortKey = "mood", sortAsc = false, showLow = false, pollTimer = null;
-let tab = ["#research", "#digest", "#screen", "#stocks", "#lab", "#portfolio"].includes(location.hash) ? location.hash.slice(1) : "home", market = "us", alerts = [], showAllAlerts = false, cal = {items: []}, anns = [], showAllAnns = false, movesList = [];
+let T = {}, S = null, rows = [], selected = location.hash.startsWith("#stock=") ? decodeURIComponent(location.hash.slice(7)) : null, sortKey = "mood", sortAsc = false, showLow = false, pollTimer = null;
+let tab = location.hash.startsWith("#stock=") ? "stocks" : ["#research", "#digest", "#screen", "#stocks", "#lab", "#portfolio"].includes(location.hash) ? location.hash.slice(1) : "home", market = "us", alerts = [], showAllAlerts = false, cal = {items: []}, anns = [], showAllAnns = false, movesList = [];
 try { market = localStorage.getItem("mm_market") || "us"; } catch (e) {}
 
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -402,6 +402,66 @@ function spark(vals) {
   return `<svg viewBox="0 0 ${W} ${H}" style="width:220px;height:44px"><polyline points="${pts}" fill="none" stroke="${col}" stroke-width="1.6"/></svg>`;
 }
 
+// ---------- candlestick chart + technical facts ----------
+function candleSVG(c, zh) {
+  const n = c.dates.length; if (n < 2) return "";
+  const W = 760, PH = 230, VH = 56, PAD = 46, top = 8;
+  const hasOHLC = c.high.some((x) => x != null);
+  const hi = c.dates.map((_, i) => c.high[i] ?? c.close[i]), lo = c.dates.map((_, i) => c.low[i] ?? c.close[i]);
+  let ymax = Math.max(...hi.filter((x) => x != null)), ymin = Math.min(...lo.filter((x) => x != null));
+  (c.zones || []).forEach((z) => { if (z.high > ymax && z.low < ymax * 1.08) ymax = z.high; if (z.low < ymin && z.high > ymin * 0.92) ymin = z.low; });
+  const pad = (ymax - ymin) * 0.05 || 1; ymax += pad; ymin -= pad;
+  const step = (W - PAD) / n, bw = Math.max(1.5, step * 0.62);
+  const x = (i) => i * step + step / 2, y = (v) => top + (PH - top) * (ymax - v) / (ymax - ymin);
+  const up = zh ? "#d23c3c" : "#1f8a4c", down = zh ? "#1f8a4c" : "#d23c3c";
+  let g = "";
+  for (let k = 0; k <= 4; k++) { const v = ymin + (ymax - ymin) * k / 4, yy = y(v);
+    g += `<line x1="0" x2="${W - PAD}" y1="${yy}" y2="${yy}" stroke="var(--line)" stroke-width="0.6"/><text x="${W - PAD + 4}" y="${yy + 3}" font-size="10" fill="var(--muted)">${v.toFixed(v < 10 ? 2 : 1)}</text>`; }
+  const di = Object.fromEntries(c.dates.map((d, i) => [d, i]));
+  (c.zones || []).forEach((z) => { if (z.high < ymin || z.low > ymax) return;
+    const x0 = z.since && z.since > c.dates[0] ? (di[z.since] != null ? x(di[z.since]) : x(c.dates.findIndex((d) => d >= z.since))) : 0;
+    const col = z.kind === "resistance" ? "#d23c3c" : z.kind === "support" ? "#1f8a4c" : "#888";
+    g += `<rect x="${Math.max(0, x0)}" width="${Math.max(2, W - PAD - Math.max(0, x0))}" y="${y(Math.min(z.high, ymax))}" height="${Math.max(2, y(Math.max(z.low, ymin)) - y(Math.min(z.high, ymax)))}" fill="${col}" opacity="0.12"><title>${z.low} – ${z.high} · ${z.touches}× · ${esc(tr("ta_since", {d: z.since}))}</title></rect>`; });
+  for (let i = 0; i < n; i++) { const cl = c.close[i]; if (cl == null) continue;
+    const op = c.open[i] ?? (i ? c.close[i - 1] : cl), col = cl >= op ? up : down;
+    if (hasOHLC && c.high[i] != null) {
+      g += `<line x1="${x(i)}" x2="${x(i)}" y1="${y(c.high[i])}" y2="${y(c.low[i])}" stroke="${col}" stroke-width="1"/>`;
+      const y1 = y(Math.max(op, cl)), h = Math.max(1, y(Math.min(op, cl)) - y1);
+      g += `<rect x="${x(i) - bw / 2}" y="${y1}" width="${bw}" height="${h}" fill="${cl >= op ? (zh ? col : "var(--card)") : col}" stroke="${col}" stroke-width="1"><title>${c.dates[i]} O ${op} H ${c.high[i]} L ${c.low[i]} C ${cl}</title></rect>`;
+    } }
+  if (!hasOHLC) g += `<polyline fill="none" stroke="var(--text)" stroke-width="1.4" points="${c.close.map((v, i) => v == null ? "" : `${x(i)},${y(v)}`).join(" ")}"/>`;
+  [["ma5", "#e3a008"], ["ma20", "#3b6fd8"], ["ma60", "#9b59b6"]].forEach(([k, col]) => {
+    const pts = c[k].map((v, i) => v == null ? null : `${x(i).toFixed(1)},${y(v).toFixed(1)}`).filter(Boolean).join(" ");
+    if (pts) g += `<polyline fill="none" stroke="${col}" stroke-width="1.1" points="${pts}"/>`; });
+  const vmax = Math.max(...c.volume.filter((v) => v != null), 1);
+  for (let i = 0; i < n; i++) { const v = c.volume[i]; if (v == null) continue;
+    const hgt = (VH - 6) * v / vmax, col = (c.close[i] ?? 0) >= (c.open[i] ?? c.close[i]) ? up : down;
+    g += `<rect x="${x(i) - bw / 2}" y="${PH + VH - hgt}" width="${bw}" height="${hgt}" fill="${col}" opacity="0.5"/>`; }
+  const idx = Object.fromEntries(c.dates.map((d, i) => [d, i]));
+  (c.signals || []).forEach((s) => { const i = idx[s.date]; if (i == null) return;
+    const dir = s.direction || (s.bullish ? "bullish" : "bearish"); if (dir === "neutral") return;
+    const bull = dir === "bullish", yy = bull ? y(lo[i]) + 12 : y(hi[i]) - 12, col = bull ? up : down;
+    g += `<text x="${x(i)}" y="${yy}" font-size="11" text-anchor="middle" fill="${col}">${bull ? "▲" : "▼"}<title>${s.date} ${esc(tr("ta_" + s.kind))}</title></text>`; });
+  [0, Math.floor(n / 2), n - 1].forEach((i) => { g += `<text x="${Math.min(Math.max(x(i), 30), W - PAD - 30)}" y="${PH + VH + 14}" font-size="10" text-anchor="middle" fill="var(--muted)">${c.dates[i]}</text>`; });
+  const legend = `<div class="note" style="display:flex;gap:12px;flex-wrap:wrap"><span style="color:#e3a008">— MA5</span><span style="color:#3b6fd8">— MA20</span><span style="color:#9b59b6">— MA60</span><span><span style="background:#1f8a4c33;padding:0 6px">&nbsp;</span> ${esc(tr("ta_support"))}</span><span><span style="background:#d23c3c33;padding:0 6px">&nbsp;</span> ${esc(tr("ta_resistance"))}</span><span>▲▼ ${esc(tr("ta_signals"))}</span></div>`;
+  return `<svg viewBox="0 0 ${W} ${PH + VH + 18}" style="width:100%;height:auto;display:block">${g}</svg>${legend}`;
+}
+
+function techHTML(t) {
+  if (!t) return "";
+  const zh = S.lang === "zh", tr_ = t.trend || {};
+  const zl = (z) => z ? `${z.low.toFixed(2)} – ${z.high.toFixed(2)}（${esc(tr("ta_touches", {n: z.touches}))}，${pct(z.distance)}）` : "—";
+  let h = `<h3>${esc(tr("ta_title"))}</h3>${candleSVG(t.chart, zh)}`;
+  if (!t.has_ohlc) h += `<p class="note">${esc(tr("ta_no_ohlc"))}</p>`;
+  h += `<table class="hist"><tbody>
+    <tr><td>${esc(tr("ta_trend"))}</td><td>${esc(tr("ta_trend_" + (tr_.state || "mixed")))}${tr_.rsi != null ? ` · RSI ${tr_.rsi.toFixed(0)}` : ""}${t.from_high_52w != null ? ` · ${esc(tr("ta_from_high", {x: pct(t.from_high_52w)}))}` : ""}</td></tr>
+    <tr><td>${esc(tr("ta_support"))}</td><td>${zl(t.nearest_support)}</td></tr>
+    <tr><td>${esc(tr("ta_resistance"))}</td><td>${zl(t.nearest_resistance)}</td></tr></tbody></table>`;
+  if ((t.signals || []).length) h += `<ul class="pts">${t.signals.map((s) => `<li>${s.direction === "neutral" ? "●" : s.bullish ? "▲" : "▼"} <b>${esc(s.date)}</b> ${esc(tr("ta_" + s.kind))} <span class="note">— ${esc(s.rule)}</span></li>`).join("")}</ul>`;
+  else h += `<p class="note">${esc(tr("ta_no_signals"))}</p>`;
+  return h + `<p class="note">${esc(t.note)}</p>`;
+}
+
 function priceHTML(d) {
   const q = d.price;
   if (!q) return "";
@@ -409,6 +469,8 @@ function priceHTML(d) {
     <div class="rets"><span>${esc(tr("d_today"))} ${pctChip(q.d1)}</span><span class="note">${esc(tr("d_vs_market", {x: pct(q.d1_excess)}))}</span>
     <span>${esc(tr("d_1w"))} ${pctChip(q.w1)}</span><span>${esc(tr("d_1m"))} ${pctChip(q.m1)}</span><span>${esc(tr("d_ytd"))} ${pctChip(q.ytd)}</span></div>
     ${spark(q.spark)}</div>`;
+  if (!q.move) h += `<div class="move"><span class="note">${esc(tr("why_any_day", {day: q.date}))}</span>
+      <button class="btn" data-why="${esc(d.ticker)}" data-day="${esc(q.date)}">${esc(tr("d_why"))}</button></div><div id="why-box"></div>`;
   if (q.move) {
     h += `<div class="move"><span>⚡ ${esc(tr("d_move_line", {day: q.move.date, ret: pct(q.move.ret), excess: pct(q.move.excess)}))}</span>
       <button class="btn" data-why="${esc(d.ticker)}" data-day="${esc(q.move.date)}">${esc(tr("d_why"))}</button></div><div id="why-box"></div>`;
@@ -420,11 +482,19 @@ function whyHTML(x) {
   if (x.error) return `<p class="note">${esc(tr("d_why_error", {error: x.error}))}</p>`;
   const ev = x.evidence || [];
   const cite = (t) => esc(t).replace(/\[(\d+)\]/g, (m, n) => ev[n - 1] && ev[n - 1].link ? `<a href="${esc(ev[n - 1].link)}" target="_blank" rel="noopener">[${n}]</a>` : m);
-  let h = `<div class="histbox"><p>${cite(x.summary || "")}</p>`;
+  let h = `<div class="histbox">`;
+  const a = x.attribution;
+  if (a) {
+    const row = (label, v, extra) => `<tr><td>${esc(label)}</td><td style="text-align:right">${pctChip(v)}</td><td class="note">${esc(extra || "")}</td></tr>`;
+    h += `<table class="hist"><tbody>${row(tr("why_total"), a.ret, "")}${row(tr("why_market"), a.market_part, tr("why_market_note", {r: pct(a.market_ret), b: a.beta_market}))}` +
+      (a.industry_part != null ? row(tr("why_industry"), a.industry_part, tr("why_industry_note", {n: a.industry, r: pct(a.industry_ret)})) : "") +
+      row(tr("why_own"), a.own_part, a.own_z != null ? tr("why_own_note", {z: Math.abs(a.own_z).toFixed(1)}) : "") + `</tbody></table>`;
+  }
+  h += `<p>${cite(x.summary || "")}</p>`;
   if ((x.causes || []).length) h += `<ul class="pts">${x.causes.map((c) => `<li>${cite(c.text)} ${c.evidence.map((n) => ev[n - 1] && ev[n - 1].link ? `<a href="${esc(ev[n - 1].link)}" target="_blank" rel="noopener">[${n}]</a>` : `[${n}]`).join(" ")}</li>`).join("")}</ul>`;
   h += `<p class="note">${esc(tr("d_why_conf", {c: tr("d_conf_" + (x.confidence || "low"))}))}${x.explained ? "" : " · " + esc(tr("d_why_unexplained"))}</p>`;
   if (ev.length) h += `<details><summary>${esc(tr("d_why_evidence", {n: ev.length}))}</summary><ol class="pts">${ev.map((e) =>
-    `<li><span class="note">${esc(e.date)} · ${esc(tr("d_kind_" + e.kind))}</span> ${e.link ? `<a href="${esc(e.link)}" target="_blank" rel="noopener">${esc(e.title)}</a>` : esc(e.title)}</li>`).join("")}</ol></details>`;
+    `<li><span class="note">${esc(e.date)} · ${esc(tr("d_kind_" + e.kind))}${e.timing && e.timing.startsWith("background") ? " · " + esc(tr("why_background")) : ""}${e.source ? " · " + esc(e.source) : ""}</span> ${e.link ? `<a href="${esc(e.link)}" target="_blank" rel="noopener">${esc(e.title)}</a>` : esc(e.title)}</li>`).join("")}</ol></details>`;
   return h + `<p class="note">${esc(tr("d_why_note"))}</p></div>`;
 }
 
@@ -586,7 +656,7 @@ function renderDetail(d) {
   if (!d) { box.innerHTML = `<p class="empty">${esc(tr("d_select"))}</p>`; return; }
   const minRel = d.min_relevance, heads = d.headlines.filter((h) => showLow || (h.relevance >= minRel && !h.dup));
   const otherLang = d.headlines.some((h) => h.lang && h.lang !== S.lang);
-  let h = `<h2>${esc(d.ticker)} · ${esc(d.name)} <a class="back" href="#overview" title="↑">↑</a></h2>${priceHTML(d)}<h3>${esc(tr("d_history"))}</h3>${chartSVG(d.history)}
+  let h = `<h2>${esc(d.ticker)} · ${esc(d.name)} <a class="back" href="#overview" title="↑">↑</a></h2>${priceHTML(d)}${techHTML(d.technical)}<h3>${esc(tr("d_history"))}</h3>${chartSVG(d.history)}
     <h3>${esc(tr("d_headlines"))} <span class="num">${heads.length} / ${d.headlines.length}</span></h3>
     <label class="toggle"><input type="checkbox" id="low" ${showLow ? "checked" : ""}> ${esc(tr("d_show_low"))}</label>`;
   if (otherLang) h += `<p class="note">${esc(tr("d_other_lang"))}</p>`;

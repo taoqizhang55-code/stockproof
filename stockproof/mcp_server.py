@@ -32,6 +32,8 @@ How to use it well:
   first (about 30-60 seconds, a little LLM credit), then stock_brief.
 - Numbers (returns, SUE, tone, base rates) come from the tools. Never invent figures, dates or news.
 - Cite the source links the tools return when you state a fact from them.
+- Charts / technicals / 支撑位 / 压力位 / K线 / 突破 -> technical_analysis(ticker) (open_chart=True to show the
+  candlestick chart); "any signals today?" -> scan_signals. Quote the rule given with each signal.
 - "Why did X move?" -> why_did_it_move. "What changed in the latest report?" -> compare_with_last_report.
   "Who reports soon?" -> earnings_calendar. "Anything important today?" -> daily_digest.
 - Historical base rates (history_like, research_findings) are averages over many companies, not forecasts.
@@ -139,6 +141,45 @@ class Tools:
             return {"error": "not followed; call refresh_stock first"}
         return self.app.explain_move(tk, date, self._lang(lang))
 
+    def technical_analysis(self, ticker: str, open_chart: bool = False, lang: str | None = None) -> dict:
+        from stockproof import quotes, ta
+        tk = self._tk(ticker)
+        bars = quotes.load_bars(self.app.data_dir, tk)
+        if bars["high"].notna().sum() < 30:                     # missing or closes only: fetch full bars
+            try:
+                quotes.update(self.app.data_dir, tk)
+                bars = quotes.load_bars(self.app.data_dir, tk)
+            except Exception as e:
+                if len(bars.dropna(subset=["close"])) < 30:
+                    return {"error": f"prices unavailable ({type(e).__name__}: {str(e)[:120]})"}
+        out = ta.analyze(bars, self._lang(lang))
+        if "error" in out:
+            return out
+        out = {"ticker": tk, "name": self.app.name_of(tk), **out}
+        if tk in self.app.settings["watchlist"]:
+            out["chart_url"] = f"http://127.0.0.1:8765/#stock={tk}"
+            if open_chart:
+                out["dashboard"] = self.open_dashboard(f"stock={tk}")
+        else:
+            out["chart"] = "follow the stock (refresh_stock) to see its candlestick chart in the dashboard"
+        return self._clean(out)
+
+    def scan_signals(self, days: int = 3, lang: str | None = None) -> dict:
+        from stockproof import quotes, ta
+        days = max(1, min(int(days), 20))
+        rules = ta.RULES if self._lang(lang) == "zh" else ta.RULES_EN
+        hits = []
+        for tk in self.app.settings["watchlist"]:
+            bars = quotes.load_bars(self.app.data_dir, tk)
+            if len(bars.dropna(subset=["close"])) < 40:
+                continue
+            for sg in ta.signals(bars, days=days):
+                hits.append({"ticker": tk, "name": self.app.name_of(tk), **sg, "rule": rules[sg["kind"]]})
+        order = {k: i for i, k in enumerate(["breakout", "breakdown", "pullback", "golden_cross", "death_cross"])}
+        hits.sort(key=lambda h: (h["date"], -order.get(h["kind"], 9)), reverse=True)
+        return self._clean({"days": days, "signals": hits[:80],
+                            "note": "Signals describe price action, not forecasts. Test one on history with lab_backtest."})
+
     def compare_with_last_report(self, ticker: str, lang: str | None = None) -> dict:
         tk = self._tk(ticker)
         if tk not in self.app.settings["watchlist"]:
@@ -243,7 +284,7 @@ class Tools:
         zh = self._lang(lang) == "zh"
         g = lambda name, tools, ask: {"group": name, "tools": tools, "try": ask}
         if zh:
-            groups = [g("日常看盘", ["watchlist", "stock_brief", "why_did_it_move", "compare_with_last_report",
+            groups = [g("日常看盘", ["watchlist", "stock_brief", "technical_analysis", "scan_signals", "why_did_it_move", "compare_with_last_report",
                                   "company_announcements", "earnings_calendar", "daily_digest", "refresh_stock"],
                         ["我关注的股票今天怎么样？", "茅台最近有什么新闻和公告？", "宁德时代今天为什么跌？",
                          "腾讯这期财报和上期比变了什么？", "下周谁发财报？", "今天的简报"]),
@@ -256,7 +297,7 @@ class Tools:
                       g("持仓体检", ["portfolio_checkup"], ["帮我体检持仓：600519 100 股、00700 300 股、AAPL 50 股"]),
                       g("网页看板", ["open_dashboard"], ["打开网页看板", "打开网页看板的持仓体检页"])]
         else:
-            groups = [g("Daily", ["watchlist", "stock_brief", "why_did_it_move", "compare_with_last_report",
+            groups = [g("Daily", ["watchlist", "stock_brief", "technical_analysis", "scan_signals", "why_did_it_move", "compare_with_last_report",
                                   "company_announcements", "earnings_calendar", "daily_digest", "refresh_stock"],
                         ["How are my stocks today?", "What's new with NVDA?", "Why did 300750 drop today?",
                          "What changed in Tencent's latest report?", "Who reports next week?"]),
@@ -277,6 +318,7 @@ class Tools:
 **1. 日常看盘**
 - 我关注的股票今天怎么样：涨跌、新闻情绪、最新财报 —— 问"我关注的股票今天怎么样？"
 - 一只股票的全貌：新闻（附链接）、财报解读、业绩惊喜、公告、下次财报日 —— "茅台最近有什么新闻和公告？"
+- K 线与技术面：趋势、支撑位/压力位、突破和回踩信号，打开 K 线图 —— "宁德时代的支撑位和压力位在哪？" "我关注的股票今天有没有突破？"
 - 为什么涨跌：只用当天前后的新闻、公告、财报解释，注明出处 —— "宁德时代今天为什么跌？"
 - 财报对比：最新两期相比，业绩、展望、风险、分红有什么变化 —— "腾讯这期财报和上期比变了什么？"
 - 公告监控、财报日历、每日简报 —— "下周谁发财报？" "今天的简报"
@@ -393,7 +435,7 @@ Information and research, not investment advice."""
         """Start the local dashboard in the background (if it isn't running) and open it in the browser."""
         import subprocess
         import time
-        tab = tab if tab in self.TABS else "home"
+        tab = tab if tab in self.TABS or tab.startswith("stock=") else "home"
         url = f"http://127.0.0.1:{port}/" + ("" if tab == "home" else "#" + tab)
         started = False
         if not self._dashboard_up(port):
@@ -667,6 +709,21 @@ def build_server(tools: Tools):
         announcements and reports published around that day, with numbered citations and a confidence level.
         Says so when nothing found explains it. One LLM call (cached). date: YYYY-MM-DD."""
         return tools.why_did_it_move(ticker, date, lang)
+
+    @srv.tool()
+    def technical_analysis(ticker: str, open_chart: bool = False, lang: str | None = None) -> dict:
+        """Technical picture of a stock from daily bars: trend (moving-average order, RSI, MACD), support and
+        resistance zones (price levels where it turned several times, with touch counts and distance), 52-week
+        range, and chart signals in the last 5 days (breakout on volume, breakdown, pullback, golden/death cross,
+        MACD, RSI, Bollinger), each with its exact rule. open_chart=True opens the candlestick chart in the
+        dashboard (followed stocks). Describes price action; not a forecast. Works for any A/HK/US stock."""
+        return tools.technical_analysis(ticker, open_chart, lang)
+
+    @srv.tool()
+    def scan_signals(days: int = 3, lang: str | None = None) -> dict:
+        """Scan every stock in the watchlist for chart signals in the last `days` trading days (breakouts,
+        breakdowns, pullbacks to support, crosses, RSI/Bollinger extremes, volume spikes), newest first."""
+        return tools.scan_signals(days, lang)
 
     @srv.tool()
     def compare_with_last_report(ticker: str, lang: str | None = None) -> dict:

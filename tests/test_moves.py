@@ -84,3 +84,25 @@ def test_explain_without_evidence_is_never_marked_explained(tmp_path):
     out = explain.explain(Store(str(tmp_path)), Overconfident(), "p:m", str(tmp_path), "300750.SZ",
                           days[-2].date().isoformat(), "x", "en")
     assert out["evidence"] == [] and out["explained"] is False
+
+
+def test_attribution_splits_market_and_own(tmp_path):
+    import numpy as np
+    import pandas as pd
+    from stockproof import explain
+    d = tmp_path / "quotes"
+    d.mkdir()
+    idx = pd.bdate_range("2026-01-01", periods=160)
+    rng = np.random.default_rng(0)
+    mkt = rng.normal(0, 0.01, len(idx))
+    own = rng.normal(0, 0.005, len(idx))
+    mkt[-1], own[-1] = -0.02, -0.01                       # last day: market -2%, own -1%
+    stock = 1.5 * mkt + own
+    pd.DataFrame({"close": 100 * np.cumprod(1 + stock)}, index=idx).to_csv(d / "AAPL.csv")
+    pd.DataFrame({"close": 100 * np.cumprod(1 + mkt)}, index=idx).to_csv(d / "_SPX.csv")
+    a = explain.attribution(str(tmp_path), "AAPL", idx[-1].date().isoformat(), fetch=False)
+    assert abs(a["beta_market"] - 1.5) < 0.2 and abs(a["market_part"] - (-0.03)) < 0.005
+    assert abs(a["own_part"] - (-0.01)) < 0.005 and a["industry_part"] is None
+    p = explain.build_prompt("Apple", "AAPL", idx[-1].date().isoformat(), {"ret": a["ret"], "market": -0.02, "excess": 0.0},
+                             [{"date": "2026-01-02", "kind": "news", "title": "old"}], "zh", a)
+    assert "Attribution" in p and "background_" in p

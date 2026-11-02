@@ -297,6 +297,16 @@ class Dashboard:
             })
         return _clean(rows)
 
+    def technical(self, ticker: str, lang: str) -> dict | None:
+        """Candlestick chart data + technical facts (trend, support/resistance, signals)."""
+        from stockproof import ta
+        bars = quotes.load_bars(self.data_dir, ticker.upper())
+        if len(bars.dropna(subset=["close"])) < 30:
+            return None
+        out = ta.analyze(bars, lang)
+        out["chart"] = ta.chart_data(bars)
+        return out
+
     def stock(self, ticker: str, lang: str) -> dict:
         tk = ticker.upper()
         store = self._store()
@@ -326,6 +336,7 @@ class Dashboard:
             "history_like": self.history(tk, rep),
             "forecast": self._forecast(tk),
             "price": quotes.summary(self.data_dir, tk),
+            "technical": self.technical(tk, lang),
             "announcements": announcements.recent(store, [tk], days=60, min_importance=1, lang=lang)[:30]
                              if cn.is_cn(tk) else [],
             "eps": eps_rows,
@@ -774,8 +785,21 @@ def make_handler(app: Dashboard, port: int):
     return Handler
 
 
+def bind(app: Dashboard, port: int, tries: int = 20):
+    """The server on `port`, or on the next free port when that one is taken (e.g. another stockproof)."""
+    for p in range(port, port + tries):
+        try:
+            return ThreadingHTTPServer(("127.0.0.1", p), make_handler(app, p)), p
+        except OSError:
+            continue
+    raise SystemExit(f"Ports {port}-{port + tries - 1} are all in use: close another program or pass --port.")
+
+
 def serve(app: Dashboard, port: int = 8765, open_browser: bool = True) -> None:
-    server = ThreadingHTTPServer(("127.0.0.1", port), make_handler(app, port))
+    server, actual = bind(app, port)
+    if actual != port:
+        print(f"Port {port} is in use (maybe another stockproof page is open), using {actual} instead.")
+    port = actual
     url = f"http://127.0.0.1:{port}/"
     print(f"stockproof dashboard running at {url}  (press Ctrl+C to stop)")
     if open_browser:

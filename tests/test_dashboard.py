@@ -162,3 +162,18 @@ class RefreshJob(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_bind_moves_to_next_free_port(tmp_path):
+    import socket
+    from stockproof.dashboard import Dashboard, bind
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    s.listen()
+    taken = s.getsockname()[1]
+    try:
+        server, port = bind(Dashboard(str(tmp_path), "deepseek", None, None), taken)
+        assert port != taken
+        server.server_close()
+    finally:
+        s.close()
