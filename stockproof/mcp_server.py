@@ -33,7 +33,9 @@ How to use it well:
 - Numbers (returns, SUE, tone, base rates) come from the tools. Never invent figures, dates or news.
 - Cite the source links the tools return when you state a fact from them.
 - Charts / technicals / 支撑位 / 压力位 / K线 / 突破 -> technical_analysis(ticker) (open_chart=True to show the
-  candlestick chart); "any signals today?" -> scan_signals (watchlist). "Which stocks broke out today?" / 全市场突破 /
+  candlestick chart); it returns `chart_markdown` (an image of the candlestick chart with the zones): put it on
+  its own line in your answer, exactly as given and not in a code block, then explain it. Only when that is
+  missing, paste `text_chart` (a chart in characters) in a ``` code block. "Any signals today?" -> scan_signals (watchlist). "Which stocks broke out today?" / 全市场突破 /
   今天哪些股票放量突破 -> scan_market. Quote the rule given with each signal; these are observations, not orders.
 - "Why did X move?" -> why_did_it_move. "What changed in the latest report?" -> compare_with_last_report.
   "Who reports soon?" -> earnings_calendar. "Anything important today?" -> daily_digest.
@@ -160,6 +162,14 @@ class Tools:
         if "error" in out:
             return out
         out = {"ticker": tk, "name": self.app.name_of(tk), **out}
+        img = self._chart_image(tk, out.get("date", ""), self._lang(lang))
+        if img:
+            out["chart_markdown"] = img
+            out["chart_howto"] = ("Put chart_markdown on its own line at the top of your answer, exactly as given, "
+                                  "NOT in a code block: it renders as the candlestick chart image.")
+        else:
+            out["text_chart"] = ta.text_chart(bars, out.get("zones"), lang=self._lang(lang))
+            out["chart_howto"] = "Paste text_chart verbatim inside a ``` code block (a chart drawn in characters)."
         if tk in self.app.settings["watchlist"]:
             out["chart_url"] = f"http://127.0.0.1:8765/#stock={tk}"
             if open_chart:
@@ -167,6 +177,18 @@ class Tools:
         else:
             out["chart"] = "follow the stock (refresh_stock) to see its candlestick chart in the dashboard"
         return self._clean(out)
+
+    def _chart_image(self, tk: str, day: str, lang: str) -> str | None:
+        """Markdown for the chart image served by the local dashboard (started in the background if needed)."""
+        if os.environ.get("STOCKPROOF_CHART_IMAGES", "1") == "0":
+            return None
+        port = 8765
+        r = self.open_dashboard("home", port=port, open_browser=False, _wait=20.0)
+        if r.get("error"):
+            return None
+        from urllib.parse import quote
+        title = ("K线图" if lang == "zh" else "candlestick chart")
+        return f"![{self.app.name_of(tk)} {title}](http://127.0.0.1:{port}/chart/{quote(tk)}.svg?lang={lang}&d={day})"
 
     def scan_signals(self, days: int = 3, lang: str | None = None) -> dict:
         from stockproof import quotes, ta
@@ -402,13 +424,35 @@ Information and research, not investment advice."""
     # ---------------------------------------------------------------- dashboard
     TABS = ("home", "stocks", "digest", "screen", "lab", "portfolio", "research")
 
-    def _dashboard_up(self, port: int) -> bool:
+    def _dashboard_state(self, port: int) -> dict | None:
+        import json as _json
         import urllib.request
         try:
             with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/state", timeout=1.5) as r:
-                return r.status == 200
+                return _json.loads(r.read().decode("utf-8")) if r.status == 200 else None
         except Exception:
+            return None
+
+    def _dashboard_up(self, port: int) -> bool:
+        return self._dashboard_state(port) is not None
+
+    def _stop_stale_dashboard(self, port: int) -> bool:
+        """A dashboard started earlier keeps running old code after stockproof is updated: stop it so a
+        fresh one starts. Only stops a stockproof dashboard that reports its own pid and older code."""
+        import signal
+        import time
+        from stockproof import code_stamp
+        st = self._dashboard_state(port)
+        if not st or not st.get("pid") or st.get("code", 0) >= code_stamp():
             return False
+        try:
+            os.kill(int(st["pid"]), signal.SIGTERM)
+        except (OSError, ValueError):
+            return False
+        t0 = time.time()
+        while self._dashboard_up(port) and time.time() - t0 < 5:
+            time.sleep(0.2)
+        return True
 
     TOOL_TAB = {"portfolio_checkup": "portfolio", "screen_stocks": "screen", "evidence_scorecard": "screen",
                 "daily_digest": "digest", "research_findings": "research", "watchlist": "stocks",
@@ -461,6 +505,7 @@ Information and research, not investment advice."""
         tab = tab if tab in self.TABS or tab.startswith("stock=") else "home"
         url = f"http://127.0.0.1:{port}/" + ("" if tab == "home" else "#" + tab)
         started = False
+        self._stop_stale_dashboard(port)
         if not self._dashboard_up(port):
             log = open(os.path.join(self.app.data_dir, "dashboard_from_agent.log"), "a", encoding="utf-8")
             cmd = [sys.executable, "-u", "-m", "stockproof", "dashboard", "--data-dir", self.app.data_dir,
@@ -738,7 +783,8 @@ def build_server(tools: Tools):
         """Technical picture of a stock from daily bars: trend (moving-average order, RSI, MACD), support and
         resistance zones (price levels where it turned several times, with touch counts and distance), 52-week
         range, and chart signals in the last 5 days (breakout on volume, breakdown, pullback, golden/death cross,
-        MACD, RSI, Bollinger), each with its exact rule. open_chart=True opens the candlestick chart in the
+        MACD, RSI, Bollinger), each with its exact rule. Includes `chart_markdown`, a candlestick chart image with
+        the zones marked: put it in your answer as is (not in a code block). open_chart=True opens the candlestick chart in the
         dashboard (followed stocks). Describes price action; not a forecast. Works for any A/HK/US stock."""
         return tools.technical_analysis(ticker, open_chart, lang)
 

@@ -257,3 +257,57 @@ def chart_data(bars: pd.DataFrame, days: int = 160) -> dict:
             "ma5": col("ma5"), "ma20": col("ma20"), "ma60": col("ma60"),
             "zones": zones(bars),
             "signals": [x for x in signals(bars, days=min(days, 60)) if x["kind"] in CHART_KINDS]}
+
+
+def text_chart(bars: pd.DataFrame, zs: list[dict] | None = None, days: int = 60, height: int = 14,
+               lang: str = "zh") -> str:
+    """A candlestick chart in plain ASCII, for terminals and chat answers (DSH shows no images).
+    # up-day body, o down-day body, | high-low range, - a support/resistance zone, < the last close.
+    ASCII only: block and box-drawing characters have different widths in many chat fonts."""
+    b = bars.dropna(subset=["close"]).iloc[-days:]
+    if len(b) < 10:
+        return ""
+    zh = lang == "zh"
+    o = b["open"].fillna(b["close"]).to_numpy(float)
+    c = b["close"].to_numpy(float)
+    h = b["high"].fillna(b["close"]).to_numpy(float)
+    lo_ = b["low"].fillna(b["close"]).to_numpy(float)
+    last = float(c[-1])
+    zs = [z for z in (zones(bars) if zs is None else zs) if abs(z["mid"] / last - 1) <= 0.15]
+    top = max(float(h.max()), *[z["high"] for z in zs]) if zs else float(h.max())
+    bot = min(float(lo_.min()), *[z["low"] for z in zs]) if zs else float(lo_.min())
+    if top <= bot:
+        return ""
+    step = (top - bot) / height
+    band = lambda r: (top - r * step, top - (r + 1) * step)          # (upper, lower) price of row r
+    dec = 2 if last >= 1 else 3
+    lines = []
+    for r in range(height):
+        up_p, lo_p = band(r)
+        row = []
+        zone_here = [z for z in zs if z["low"] <= up_p and z["high"] >= lo_p]
+        for j in range(len(b)):
+            bt, bb = max(o[j], c[j]), min(o[j], c[j])
+            if bt >= lo_p and bb <= up_p:
+                row.append("#" if c[j] >= o[j] else "o")
+            elif h[j] >= lo_p and lo_[j] <= up_p:
+                row.append("|")
+            elif zone_here:
+                row.append("-")
+            else:
+                row.append(" ")
+        label = ""
+        if lo_p <= last <= up_p:
+            label = f" < {last:.{dec}f}"
+        for z in zone_here:
+            if z["high"] <= up_p or r == 0:                              # label each zone once, on its top row
+                kind = {"support": "支撑" if zh else "support", "resistance": "阻力" if zh else "resistance",
+                        "inside": "区间内" if zh else "inside"}[z["kind"]]
+                label += f"  {kind} {z['low']:.{dec}f}–{z['high']:.{dec}f}"
+        axis = f"{(up_p + lo_p) / 2:>9.{dec}f} +" if r % 3 == 0 else " " * 10 + "|"
+        lines.append(axis + "".join(row) + label)
+    d0, d1 = b.index[0].date().isoformat(), b.index[-1].date().isoformat()
+    lines.append(" " * 10 + "+" + d0 + " " * max(1, len(b) - len(d0) - len(d1)) + d1)
+    legend = ("# 阳线  o 阴线  | 最高-最低  - 支撑/阻力区间  < 最新收盘" if zh else
+              "# up day  o down day  | high-low  - support/resistance zone  < last close")
+    return "\n".join(lines) + "\n" + " " * 11 + legend

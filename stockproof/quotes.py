@@ -138,10 +138,16 @@ def _download_bars(ticker: str, start: dt.date) -> pd.DataFrame:
                                                  end_date="20500101", adjust="qfq"))
         except Exception:
             prefix = {"SH": "sh", "SZ": "sz", "BJ": "bj"}[info["market"]]
-            return _std(cn._ak().stock_zh_a_daily(symbol=prefix + info["code"], start_date=s8, end_date="20500101",
-                                                  adjust="qfq"))
+            df = _std(cn._ak().stock_zh_a_daily(symbol=prefix + info["code"], start_date=s8, end_date="20500101",
+                                                adjust="qfq"))
+            df["volume"] = df["volume"] / 100            # Sina counts shares; Eastmoney (and our files) count lots of 100
+            return df
     try:
         return _nasdaq(ticker, start)
+    except Exception:
+        pass
+    try:
+        return _nasdaq(ticker, start, "etf")                  # sector ETFs (XLK, SMH ...) for US attribution
     except Exception:
         return _std(cn._ak().stock_us_daily(symbol=ticker.replace("-", "."), adjust="qfq")).loc[str(start):]
 
@@ -173,6 +179,13 @@ def load(data_dir: str, ticker: str) -> pd.Series:
     return load_bars(data_dir, ticker)["close"]
 
 
+def _same_volume_units(a: pd.Series, b: pd.Series) -> bool:
+    """False when the saved volumes and the new ones differ by a constant factor (shares vs lots of 100)."""
+    r = (a / b).replace([np.inf, -np.inf], np.nan).dropna()
+    r = r[r > 0]
+    return not ((r > 20) | (r < 0.05)).any()               # a 100x jump on any day: units mixed
+
+
 def update(data_dir: str, ticker: str, years: float = 2.0) -> pd.Series:
     """Top up the saved bars. Forward-adjusted prices change when a dividend is paid, so the last
     ~2 years are re-downloaded when the new data doesn't line up with the saved data, or when the
@@ -186,8 +199,9 @@ def update(data_dir: str, ticker: str, years: float = 2.0) -> pd.Series:
     new = download_bars(ticker, start)
     if not old.empty and len(new):
         overlap = old.index.intersection(new.index)
-        if len(overlap) and not np.allclose(old.loc[overlap, "close"], new.loc[overlap, "close"], rtol=1e-4):
-            new = download_bars(ticker, full)                # re-adjusted
+        if len(overlap) and (not np.allclose(old.loc[overlap, "close"], new.loc[overlap, "close"], rtol=1e-4)
+                             or not _same_volume_units(old.loc[overlap, "volume"], new.loc[overlap, "volume"])):
+            new = download_bars(ticker, full)                # re-adjusted, or volume saved in other units
             old = old.iloc[0:0]
     df = pd.concat([old[~old.index.isin(new.index)], new]).sort_index() if not old.empty else new
     os.makedirs(os.path.dirname(_path(data_dir, ticker)), exist_ok=True)

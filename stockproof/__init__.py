@@ -13,3 +13,13 @@ def compat_env() -> None:
 
 
 compat_env()
+
+
+def code_stamp() -> int:
+    """Newest modification time of the package's own .py files: tells a long-running dashboard started
+    by an agent apart from the code now on disk (after an update it must be restarted)."""
+    here = _os.path.dirname(_os.path.abspath(__file__))
+    try:
+        return int(max(_os.path.getmtime(_os.path.join(here, f)) for f in _os.listdir(here) if f.endswith(".py")))
+    except (OSError, ValueError):
+        return 0

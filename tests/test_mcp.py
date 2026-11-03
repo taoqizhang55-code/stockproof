@@ -188,3 +188,36 @@ def test_welcome_suggests_dashboard_without_opening(tmp_path, monkeypatch):
     t.auto_open("startup", background=False)
     out = w.watchlist()
     assert "打开网页看板" in out["IMPORTANT_first_time_user"]["show_to_user_after_your_answer"] and opened == []
+
+
+def test_stale_dashboard_is_restarted(tmp_path, monkeypatch):
+    import stockproof
+    t = mcp_server.Tools(str(tmp_path))
+    states = [{"pid": 4242, "code": 1}, None, None]            # old code running -> stopped -> gone
+    monkeypatch.setattr(t, "_dashboard_state", lambda port: states.pop(0) if states else {"pid": 1, "code": 9e12})
+    killed = []
+    monkeypatch.setattr(mcp_server.os, "kill", lambda pid, sig: killed.append(pid))
+    monkeypatch.setattr(stockproof, "code_stamp", lambda: 100)
+    spawned = []
+    r = t.open_dashboard("home", open_browser=False, _spawn=lambda *a, **k: spawned.append(a), _wait=2)
+    assert killed == [4242] and spawned and r["started"]
+
+
+def test_technical_analysis_gives_chart_image(tmp_path, monkeypatch):
+    import datetime as dt
+    import numpy as np
+    import pandas as pd
+    monkeypatch.setenv("STOCKPROOF_CHART_IMAGES", "1")
+    q = tmp_path / "quotes"
+    q.mkdir()
+    days = pd.bdate_range(end=dt.date.today(), periods=200)
+    c = 10 + np.sin(np.arange(200) / 8)
+    pd.DataFrame({"close": c, "open": c, "high": c * 1.01, "low": c * 0.99, "volume": 1e6}, index=days) \
+        .rename_axis("date").to_csv(q / "600000.SH.csv")
+    t = mcp_server.Tools(str(tmp_path))
+    monkeypatch.setattr(t, "open_dashboard", lambda *a, **k: {"url": "http://127.0.0.1:8765/"})
+    r = t.technical_analysis("600000.SH", lang="zh")
+    assert r["chart_markdown"].startswith("![") and "/chart/600000.SH.svg" in r["chart_markdown"]
+    assert "text_chart" not in r
+    monkeypatch.setattr(t, "open_dashboard", lambda *a, **k: {"error": "no"})
+    assert "text_chart" in t.technical_analysis("600000.SH", lang="zh")

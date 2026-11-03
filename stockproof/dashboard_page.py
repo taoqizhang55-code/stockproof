@@ -395,7 +395,7 @@ function chartSVG(hist) {
 function pctChip(v, flag) {
   if (v === null || v === undefined) return '<span class="chip none">—</span>';
   const c = v >= 0.005 ? "positive" : v <= -0.005 ? "negative" : "neutral";
-  return `<span class="chip ${c}" ${flag ? `title="${esc(tr("d_unusual"))}"` : ""}>${flag ? "⚡" : ""}${pct(v).replace(/(\.\d)\d%/, "$1%")}</span>`;
+  return `<span class="chip ${c}" ${flag ? `title="${esc(tr("d_unusual"))}"` : ""}>${flag ? "⚡" : ""}${pct1(v)}</span>`;
 }
 
 function spark(vals) {
@@ -490,8 +490,8 @@ function whyHTML(x) {
   const a = x.attribution;
   if (a) {
     const row = (label, v, extra) => `<tr><td>${esc(label)}</td><td style="text-align:right">${pctChip(v)}</td><td class="note">${esc(extra || "")}</td></tr>`;
-    h += `<table class="hist"><tbody>${row(tr("why_total"), a.ret, "")}${row(tr("why_market"), a.market_part, tr("why_market_note", {r: pct(a.market_ret), b: a.beta_market}))}` +
-      (a.industry_part != null ? row(tr("why_industry"), a.industry_part, tr("why_industry_note", {n: a.industry, r: pct(a.industry_ret)})) : "") +
+    h += `<table class="hist"><tbody>${row(tr("why_total"), a.ret, "")}${row(tr("why_market"), a.market_part, tr("why_market_note", {r: pct1(a.market_ret), b: a.beta_market}))}` +
+      (a.industry_part != null ? row(tr("why_industry"), a.industry_part, tr("why_industry_note", {n: a.industry, r: pct1(a.industry_ret)})) : "") +
       row(tr("why_own"), a.own_part, a.own_z != null ? tr("why_own_note", {z: Math.abs(a.own_z).toFixed(1)}) : "") + `</tbody></table>`;
   }
   const pe = x.peers;
@@ -554,6 +554,8 @@ async function askWhy(tk, day) {
 }
 
 const pct = (v) => (v === null || v === undefined) ? "—" : (v > 0 ? "+" : "") + (100 * v).toFixed(2) + "%";
+// one decimal, rounded the same way as the Python side (quotes.fmt_pct), so the "why" table and the AI's text agree
+function pct1(v) { if (v === null || v === undefined) return "—"; const x = Math.round(1000 * v) / 10; return (x > 0 ? "+" : "") + x.toFixed(1) + "%"; }
 
 function historyHTML(rep, hl) {
   if (!hl) return "";

@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS move_explanations (
     PRIMARY KEY (ticker, day, model, lang)
 );
 """
-VERSION = 2                      # 2: attribution table + evidence dated against the move day
+VERSION = 4                      # 2: attribution + evidence timing; 3: peers + publisher links; 4: US sector ETF
 
 
 def evidence(store, ticker: str, day: str, before: int = 3, after: int = 1,
@@ -109,6 +109,65 @@ def _industry_series(data_dir: str, code: str, day: pd.Timestamp, fetch: bool = 
     return s if len(s) else None
 
 
+# US stocks: SEC industry code (SIC) -> the sector ETF that tracks that industry. Checked in order.
+SIC_ETF = [
+    (3674, 3674, "SMH", "Semiconductors"),
+    (6500, 6553, "XLRE", "Real estate"), (6798, 6798, "XLRE", "Real estate"),
+    (6000, 6799, "XLF", "Financials"),
+    (2830, 2836, "XLV", "Health care"), (3841, 3851, "XLV", "Health care"), (8000, 8099, "XLV", "Health care"),
+    (1300, 1399, "XLE", "Energy"), (2900, 2999, "XLE", "Energy"),
+    (4900, 4949, "XLU", "Utilities"),
+    (4800, 4899, "XLC", "Communication services"), (7810, 7829, "XLC", "Communication services"),
+    (2710, 2741, "XLC", "Communication services"),
+    (2000, 2199, "XLP", "Consumer staples"), (2840, 2844, "XLP", "Consumer staples"), (5400, 5499, "XLP", "Consumer staples"),
+    (5912, 5912, "XLP", "Consumer staples"),
+    (3570, 3579, "XLK", "Technology"), (3600, 3699, "XLK", "Technology"), (3810, 3829, "XLK", "Technology"),
+    (7370, 7379, "XLK", "Technology"),
+    (3711, 3716, "XLY", "Consumer discretionary"), (5000, 5999, "XLY", "Consumer discretionary"),
+    (7000, 7099, "XLY", "Consumer discretionary"), (2300, 2399, "XLY", "Consumer discretionary"),
+    (1000, 1099, "XLB", "Materials"), (1400, 1499, "XLB", "Materials"), (2600, 2699, "XLB", "Materials"),
+    (2800, 2829, "XLB", "Materials"), (2850, 2899, "XLB", "Materials"), (3300, 3399, "XLB", "Materials"),
+    (1500, 1799, "XLI", "Industrials"), (3400, 3569, "XLI", "Industrials"), (3580, 3599, "XLI", "Industrials"),
+    (3700, 3799, "XLI", "Industrials"), (4000, 4799, "XLI", "Industrials"), (8700, 8748, "XLI", "Industrials"),
+]
+
+
+def sector_etf(sic) -> tuple[str, str] | None:
+    try:
+        n = int(sic)
+    except (TypeError, ValueError):
+        return None
+    return next(((etf, name) for lo, hi, etf, name in SIC_ETF if lo <= n <= hi), None)
+
+
+def _us_sector(data_dir: str, ticker: str, fetch: bool = True) -> tuple[str, str] | None:
+    """(ETF, sector name) for a US stock from its SEC filing profile (cached)."""
+    from stockproof.sec import SECCache
+    try:
+        c = SECCache(data_dir)
+        if fetch:
+            tmap = c.ticker_map()
+        else:                                       # offline: the saved ticker list, however old
+            raw = c.cached("company_tickers.json") or {}
+            tmap = {str(r["ticker"]).upper().replace(".", "-"): {"cik": int(r["cik_str"])} for r in raw.values()}
+        cik = (tmap.get(ticker.upper()) or {}).get("cik")
+        sub = (c.submissions(cik) if fetch else c.cached(f"submissions_{cik}.json")) if cik else None
+    except Exception:
+        return None
+    return sector_etf((sub or {}).get("sic"))
+
+
+def _etf_series(data_dir: str, etf: str, day: pd.Timestamp, fetch: bool = True) -> pd.Series | None:
+    s = quotes.load(data_dir, etf)
+    if (s.empty or s.index[-1] < day) and fetch:
+        try:
+            quotes.update(data_dir, etf)
+            s = quotes.load(data_dir, etf)
+        except Exception:
+            pass
+    return s if len(s) else None
+
+
 def attribution(data_dir: str, ticker: str, day: str, window: int = 120, fetch: bool = True) -> dict | None:
     """Split the day's return into market, industry and the stock's own part, using betas estimated
     on the previous `window` trading days:  ret = a + b_m·market + b_i·(industry − market) + own."""
@@ -118,8 +177,13 @@ def attribution(data_dir: str, ticker: str, day: str, window: int = 120, fetch: 
     if m.empty or d not in m.index:
         return None
     df = pd.DataFrame({"ret": m["ret"], "mkt": m["market"]})
-    code, sw = _industry_code(data_dir, ticker)
-    ind = _industry_series(data_dir, code, d, fetch) if code else None
+    if cn.is_cn(ticker):
+        code, sw = _industry_code(data_dir, ticker)
+        ind = _industry_series(data_dir, code, d, fetch) if code else None
+    else:
+        sec_ = _us_sector(data_dir, ticker, fetch)
+        sw = f"{sec_[1]} ({sec_[0]})" if sec_ else None
+        ind = _etf_series(data_dir, sec_[0], d, fetch) if sec_ else None
     if ind is not None:
         df["ind"] = ind.pct_change().reindex(df.index)
     hist = df[df.index < d].dropna().iloc[-window:]

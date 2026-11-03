@@ -106,3 +106,29 @@ def test_attribution_splits_market_and_own(tmp_path):
     p = explain.build_prompt("Apple", "AAPL", idx[-1].date().isoformat(), {"ret": a["ret"], "market": -0.02, "excess": 0.0},
                              [{"date": "2026-01-02", "kind": "news", "title": "old"}], "zh", a)
     assert "Attribution" in p and "background_" in p
+
+
+def test_us_attribution_uses_sector_etf(tmp_path, monkeypatch):
+    import numpy as np
+    import pandas as pd
+    from stockproof import explain
+    assert explain.sector_etf(3674) == ("SMH", "Semiconductors")
+    assert explain.sector_etf("7372")[0] == "XLK" and explain.sector_etf(6022)[0] == "XLF"
+    assert explain.sector_etf(6798)[0] == "XLRE" and explain.sector_etf(None) is None
+    d = tmp_path / "quotes"
+    d.mkdir()
+    idx = pd.bdate_range("2026-01-01", periods=160)
+    rng = np.random.default_rng(1)
+    mkt = rng.normal(0, 0.01, len(idx))
+    sec = rng.normal(0, 0.008, len(idx))                  # sector beyond the market
+    own = rng.normal(0, 0.004, len(idx))
+    mkt[-1], sec[-1], own[-1] = -0.01, -0.04, -0.005      # a semiconductor sell-off
+    etf = mkt + sec
+    stock = mkt + sec + own
+    pd.DataFrame({"close": 100 * np.cumprod(1 + stock)}, index=idx).to_csv(d / "NVDA.csv")
+    pd.DataFrame({"close": 100 * np.cumprod(1 + mkt)}, index=idx).to_csv(d / "_SPX.csv")
+    pd.DataFrame({"close": 100 * np.cumprod(1 + etf)}, index=idx).to_csv(d / "SMH.csv")
+    monkeypatch.setattr(explain, "_us_sector", lambda *a, **k: ("SMH", "Semiconductors"))
+    a = explain.attribution(str(tmp_path), "NVDA", idx[-1].date().isoformat(), fetch=False)
+    assert a["industry"] == "Semiconductors (SMH)"
+    assert abs(a["industry_part"] - (-0.04)) < 0.008 and abs(a["own_part"] - (-0.005)) < 0.008

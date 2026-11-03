@@ -30,7 +30,7 @@ from urllib.parse import parse_qs, urlparse
 import pandas as pd
 
 from stockproof import clock
-from stockproof import __version__, announcements, cn, compare, core, digest, earnings_calendar, explain, quotes, research
+from stockproof import __version__, code_stamp, announcements, cn, compare, core, digest, earnings_calendar, explain, quotes, research
 from stockproof.companies import display_name
 from stockproof.i18n import TEXT
 from stockproof.llm import LLMClient, LLMError
@@ -418,7 +418,7 @@ class Dashboard:
             model = model or PROVIDERS[self.provider]["model"]
         except KeyError:
             pass
-        return {"version": __version__, "watchlist": self.settings["watchlist"],
+        return {"version": __version__, "code": CODE_STAMP, "pid": os.getpid(), "watchlist": self.settings["watchlist"],
                 "names": {tk: self.name_of(tk) for tk in self.settings["watchlist"]},
                 "lang": self.settings["lang"], "model": f"{self.provider}:{model}", "job": job,
                 "sec_contact": bool((os.environ.get("STOCKPROOF_SEC_CONTACT") or "").strip()),
@@ -667,6 +667,19 @@ def make_handler(app: Dashboard, port: int):
                     if tk.upper() not in app.settings["watchlist"]:
                         return self._send(404, {"error": "not in watchlist"})
                     return self._send(200, app.stock(tk, self._lang(qs)))
+                m = re.fullmatch(r"/chart/([A-Za-z0-9.^_\-]{1,16})\.svg", url.path)
+                if m:                                 # a chart image, e.g. for DeepSeek Harness answers
+                    from stockproof import chart_svg
+                    tk = m.group(1).upper()
+                    bars = quotes.load_bars(app.data_dir, tk)
+                    if bars["high"].notna().sum() < 30 and not app.demo:
+                        try:
+                            quotes.update(app.data_dir, tk)
+                            bars = quotes.load_bars(app.data_dir, tk)
+                        except Exception:
+                            pass
+                    svg = chart_svg.render(bars, tk, app.name_of(tk), self._lang(qs))
+                    return self._send(200, svg, "image/svg+xml; charset=utf-8")
                 if not url.path.startswith("/api/"):
                     # a mistyped or pasted address (e.g. extra characters after the slash): go home
                     self.send_response(302)
@@ -809,7 +822,12 @@ def bind(app: Dashboard, port: int, tries: int = 20):
     raise SystemExit(f"Ports {port}-{port + tries - 1} are all in use: close another program or pass --port.")
 
 
+CODE_STAMP = 0                  # set when the server starts: which code this process is running
+
+
 def serve(app: Dashboard, port: int = 8765, open_browser: bool = True) -> None:
+    global CODE_STAMP
+    CODE_STAMP = code_stamp()
     server, actual = bind(app, port)
     if actual != port:
         print(f"Port {port} is in use (maybe another stockproof page is open), using {actual} instead.")
