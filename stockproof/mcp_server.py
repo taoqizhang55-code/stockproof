@@ -33,7 +33,8 @@ How to use it well:
 - Numbers (returns, SUE, tone, base rates) come from the tools. Never invent figures, dates or news.
 - Cite the source links the tools return when you state a fact from them.
 - Charts / technicals / 支撑位 / 压力位 / K线 / 突破 -> technical_analysis(ticker) (open_chart=True to show the
-  candlestick chart); "any signals today?" -> scan_signals. Quote the rule given with each signal.
+  candlestick chart); "any signals today?" -> scan_signals (watchlist). "Which stocks broke out today?" / 全市场突破 /
+  今天哪些股票放量突破 -> scan_market. Quote the rule given with each signal; these are observations, not orders.
 - "Why did X move?" -> why_did_it_move. "What changed in the latest report?" -> compare_with_last_report.
   "Who reports soon?" -> earnings_calendar. "Anything important today?" -> daily_digest.
 - Historical base rates (history_like, research_findings) are averages over many companies, not forecasts.
@@ -183,6 +184,25 @@ class Tools:
         return self._clean({"days": days, "signals": hits[:80],
                             "note": "Signals describe price action, not forecasts. Test one on history with lab_backtest."})
 
+    def scan_market(self, direction: str = "both", refresh: bool = True, lang: str | None = None) -> dict:
+        from stockproof import market_scan
+        lang = self._lang(lang)
+        res = None
+        if refresh:
+            try:
+                res = market_scan.scan(self.app.data_dir, direction if direction in ("up", "down") else "both",
+                                       lang=lang, log=lambda *a: None)
+            except Exception as e:
+                res = market_scan.latest(self.app.data_dir)
+                if res is None:
+                    return {"error": f"market list unavailable ({type(e).__name__}); try again later"}
+                res = {**res, "stale": f"live scan failed ({type(e).__name__}); showing the last saved scan"}
+        else:
+            res = market_scan.latest(self.app.data_dir)
+            if res is None:
+                return {"error": "no scan saved yet; call with refresh=True"}
+        return self._clean({**res, "hits": res["hits"][:40]})
+
     def compare_with_last_report(self, ticker: str, lang: str | None = None) -> dict:
         tk = self._tk(ticker)
         if tk not in self.app.settings["watchlist"]:
@@ -291,8 +311,8 @@ class Tools:
                                   "company_announcements", "earnings_calendar", "daily_digest", "refresh_stock"],
                         ["我关注的股票今天怎么样？", "茅台最近有什么新闻和公告？", "宁德时代今天为什么跌？",
                          "腾讯这期财报和上期比变了什么？", "下周谁发财报？", "今天的简报"]),
-                      g("选股与评分卡", ["screen_stocks", "evidence_scorecard"],
-                        ["全市场业绩最强的 A 股有哪些？", "江波龙的证据评分卡", "鞍钢在全市场排第几？"]),
+                      g("选股与评分卡", ["screen_stocks", "scan_market", "evidence_scorecard"],
+                        ["全市场业绩最强的 A 股有哪些？", "今天全市场哪些股票放量突破了？", "江波龙的证据评分卡"]),
                       g("量化实验室", ["lab_capabilities", "lab_backtest", "lab_confirm", "lab_similar", "lab_screen",
                                     "lab_policy_history", "lab_experiments", "research_findings"],
                         ["业绩大超预期后买入持有 20 天能赚钱吗？", "江波龙这种财报，历史上之后一般怎么走？",
@@ -304,8 +324,8 @@ class Tools:
                                   "company_announcements", "earnings_calendar", "daily_digest", "refresh_stock"],
                         ["How are my stocks today?", "What's new with NVDA?", "Why did 300750 drop today?",
                          "What changed in Tencent's latest report?", "Who reports next week?"]),
-                      g("Screen & scorecards", ["screen_stocks", "evidence_scorecard"],
-                        ["Strongest A-shares by fundamentals?", "Evidence scorecard for 301308"]),
+                      g("Screen & scorecards", ["screen_stocks", "scan_market", "evidence_scorecard"],
+                        ["Strongest A-shares by fundamentals?", "Which A-shares broke out today?", "Evidence scorecard for 301308"]),
                       g("Quant lab", ["lab_capabilities", "lab_backtest", "lab_confirm", "lab_similar", "lab_screen",
                                       "lab_policy_history", "lab_experiments", "research_findings"],
                         ["Does buying after big earnings beats work after costs?", "A-shares with ROE > 20% and P/E < 30"]),
@@ -727,6 +747,14 @@ def build_server(tools: Tools):
         """Scan every stock in the watchlist for chart signals in the last `days` trading days (breakouts,
         breakdowns, pullbacks to support, crosses, RSI/Bollinger extremes, volume spikes), newest first."""
         return tools.scan_signals(days, lang)
+
+    @srv.tool()
+    def scan_market(direction: str = "both", refresh: bool = True, lang: str | None = None) -> dict:
+        """Whole-market A-share chart scan: which liquid stocks broke out above resistance (with volume) or broke
+        down through support TODAY. direction: up / down / both. Takes ~30-60 s (downloads bars for the ~60 most
+        traded movers); refresh=False returns the last saved scan. Each hit has the zone, touches, volume ratio and
+        the rule. Chart facts, not orders, and untested as a strategy: say so, and offer lab_backtest."""
+        return tools.scan_market(direction, refresh, lang)
 
     @srv.tool()
     def compare_with_last_report(ticker: str, lang: str | None = None) -> dict:

@@ -57,6 +57,7 @@ h3 { font-size:15px; margin:18px 0 6px; }
 .alert .when { color:var(--muted); font-size:13px; font-variant-numeric:tabular-nums; }
 .alert .hist { color:var(--muted); font-size:13px; flex:1 1 280px; }
 .histbox { border-left:3px solid var(--accent); padding:4px 12px; margin:10px 0; }
+.peers { display:flex; flex-wrap:wrap; gap:6px; margin:4px 0 10px; } .peer { font-size:13px; white-space:nowrap; }
 .histbox p { margin:6px 0; }
 .ann { display:flex; flex-wrap:wrap; align-items:center; gap:4px 10px; padding:8px 0 8px 10px; border-top:1px solid var(--line);
        border-left:3px solid transparent; }
@@ -195,6 +196,7 @@ BODY = """
 <div id="view-screen" hidden>
 <div class="toolbar">
   <button class="btn primary" id="run-screen"></button>
+  <button class="btn" id="run-breakouts"></button>
   <span class="note" id="screen-meta"></span>
 </div>
 <p class="note" id="screen-test" style="margin:8px 0 0"></p>
@@ -216,6 +218,7 @@ BODY = """
   <section class="card"><div class="wide"><table id="overview"></table></div></section>
   <section class="card detail" id="detail"></section>
 </div>
+<section class="card" id="breakouts" hidden></section>
 <div class="cols" id="screen-body" hidden>
   <section class="card"><div class="wide"><table id="screen-table"></table></div></section>
   <section class="card detail" id="screen-detail"></section>
@@ -300,6 +303,7 @@ function applyText() {
   $("#pf-h-saved").textContent = tr("d_pf_saved");
   $("#pf-input").placeholder = "600519 100, 300750 200, 00700 300, AAPL 50"; $("#pf-run").textContent = tr("d_pf_run");
   $("#run-screen").textContent = tr("d_screen_run");
+  $("#run-breakouts").textContent = tr("d_brk_run");
   $("#make-digest").textContent = tr("d_make_digest");
   $("#digest-note").textContent = tr("d_digest_note");
   $("#mk-us").textContent = tr("d_market_us");
@@ -489,6 +493,11 @@ function whyHTML(x) {
     h += `<table class="hist"><tbody>${row(tr("why_total"), a.ret, "")}${row(tr("why_market"), a.market_part, tr("why_market_note", {r: pct(a.market_ret), b: a.beta_market}))}` +
       (a.industry_part != null ? row(tr("why_industry"), a.industry_part, tr("why_industry_note", {n: a.industry, r: pct(a.industry_ret)})) : "") +
       row(tr("why_own"), a.own_part, a.own_z != null ? tr("why_own_note", {z: Math.abs(a.own_z).toFixed(1)}) : "") + `</tbody></table>`;
+  }
+  const pe = x.peers;
+  if (pe && (pe.peers || []).length) {
+    h += `<p class="note" style="margin:10px 0 4px">${esc(tr("why_peers", {n: pe.industry, m: pct(pe.median), up: pe.up, down: pe.down, k: pe.n}))}${pe.rank ? " · " + esc(tr("why_peers_rank", {r: pe.rank, k: pe.n + 1})) : ""}</p>` +
+      `<div class="peers">${pe.peers.map((p) => `<span class="peer" data-tk="${esc(p.ticker)}">${esc(p.name || p.ticker)} ${pctChip(p.ret)}</span>`).join("")}</div>`;
   }
   h += `<p>${cite(x.summary || "")}</p>`;
   if ((x.causes || []).length) h += `<ul class="pts">${x.causes.map((c) => `<li>${cite(c.text)} ${c.evidence.map((n) => ev[n - 1] && ev[n - 1].link ? `<a href="${esc(ev[n - 1].link)}" target="_blank" rel="noopener">[${n}]</a>` : `[${n}]`).join(" ")}</li>`).join("")}</ul>`;
@@ -700,6 +709,7 @@ function showTab(t) {
   $("#view-research").hidden = $("#research-frame").hidden = t !== "research";
   $("#view-digest").hidden = $("#digest-frame").hidden = t !== "digest";
   $("#view-screen").hidden = $("#screen-body").hidden = t !== "screen";
+  $("#breakouts").hidden = t !== "screen" || !BRK;
   $("#view-home").hidden = t !== "home";
   $("#view-lab").hidden = t !== "lab";
   $("#view-portfolio").hidden = t !== "portfolio";
@@ -707,13 +717,40 @@ function showTab(t) {
   history.replaceState(null, "", t === "home" ? location.pathname : "#" + t);
   if (t === "research") loadResearch();
   if (t === "digest") loadDigest();
-  if (t === "screen") loadScreen();
+  if (t === "screen") { loadScreen(); loadBreakouts(); }
   if (t === "home") renderHome();
   if (t === "lab") loadLabTab();
   if (t === "portfolio") loadPortfolioTab();
 }
 
 // ---------- screen + evidence scorecards ----------
+let BRK = null;
+async function loadBreakouts() {
+  try { const r = await api(`/api/breakouts?lang=${S.lang}`); BRK = r && r.hits ? r : null; } catch (e) { BRK = null; }
+  renderBreakouts();
+}
+
+function renderBreakouts(msg) {
+  const box = $("#breakouts");
+  box.hidden = tab !== "screen" || (!BRK && !msg);
+  if (msg) { box.innerHTML = `<p class="note">${esc(msg)}</p>`; return; }
+  if (!BRK) return;
+  const b = BRK;
+  let h = `<h2>${esc(tr("d_brk_title"))} · ${esc(b.day)}</h2><p class="note">${esc(tr("d_brk_count", {up: b.breakouts, down: b.breakdowns, n: b.candidates}))}${b.stale ? " · " + esc(b.stale) : ""}</p>`;
+  if (!b.hits.length) h += `<p class="empty">${esc(tr("d_brk_none"))}</p>`;
+  else {
+    h += `<div class="wide"><table><tbody>` + b.hits.map((x) => {
+      const followed = S.watchlist.includes(x.ticker);
+      const zone = x.zone && x.zone[0] != null ? `${Number(x.zone[0]).toFixed(2)}–${Number(x.zone[1]).toFixed(2)}` : "";
+      return `<tr><td style="color:${x.kind === "breakout" ? "var(--pos)" : "var(--neg)"}">${x.kind === "breakout" ? "▲" : "▼"} ${esc(tr("ta_" + x.kind))}</td>
+        <td class="tk">${esc(x.ticker)}<small>${esc(x.name)}</small></td><td>${pctChip(x.pct)}</td>
+        <td class="hide-sm note">${esc(tr(x.kind === "breakout" ? "ta_resistance" : "ta_support"))} ${esc(zone)}${x.touches ? " · " + esc(tr("ta_touches", {n: x.touches})) : ""}${x.zones_crossed > 1 ? " · " + esc(tr("d_brk_multi", {n: x.zones_crossed})) : ""}${x.vol_ratio ? " · " + esc(tr("d_brk_vol", {v: Number(x.vol_ratio).toFixed(1)})) : ""}</td>
+        <td>${followed ? `<span class="note">${esc(tr("d_followed"))}</span>` : `<button class="btn sm" data-follow="${esc(x.ticker)}">${esc(tr("d_follow"))}</button>`}</td></tr>`;
+    }).join("") + `</tbody></table></div>`;
+  }
+  box.innerHTML = h + `<p class="note">${esc(b.how || "")}</p><p class="note">${esc(b.note || "")}</p>`;
+}
+
 async function loadScreen() {
   try { SC = await api(`/api/screen?lang=${S.lang}`); } catch (e) { SC = {meta: null, results: [], cards: {}}; }
   renderScreen();
@@ -1202,6 +1239,16 @@ $("#lab-add-filter").onclick = () => {
 };
 $("#lab-run").onclick = async () => { const b = $("#lab-run"); b.disabled = true; await runSpec(readSpec()); b.disabled = false; loadLabTab(); };
 $("#lab-reset").onclick = async () => { await api("/api/lab/reset", {}); CAPS = null; toast(tr("d_lab_reset_done")); loadLabTab(); };
+$("#run-breakouts").onclick = async () => {
+  const btn = $("#run-breakouts"); btn.disabled = true;
+  renderBreakouts(tr("d_brk_wait"));
+  let r;
+  try { r = await api("/api/breakouts", {lang: S.lang}); } catch (e) { r = {error: e.message}; }
+  btn.disabled = false;
+  if (r.message === "demo") { renderBreakouts(); return alert(tr("d_demo_refresh")); }
+  if (r.error) return renderBreakouts(r.error);
+  BRK = r; renderBreakouts();
+};
 $("#run-screen").onclick = async () => {
   const r = await api("/api/refresh", {kind: "screen"});
   if (r.message === "demo") return alert(tr("d_demo_refresh"));

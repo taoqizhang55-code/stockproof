@@ -481,6 +481,33 @@ def cmd_mcp(args) -> int:
     return mcp_server.main(data_dir, args.provider, args.model, args.base_url, args.auto_dashboard)
 
 
+def cmd_breakouts(args) -> int:
+    """Whole-market A-share scan for today's zone breakouts / breakdowns."""
+    from stockproof import market_scan
+    zh = args.lang == "zh"
+    print("扫描全市场 ..." if zh else "Scanning the whole market ...")
+    try:
+        r = market_scan.scan(args.data_dir, args.direction, args.top, args.lang)
+    except Exception as e:
+        print(f"  {'行情列表暂时拿不到' if zh else 'market list unavailable'}: {type(e).__name__}: {str(e)[:100]}")
+        return 1
+    print(f"  {r['day']} · {r['breakouts']} {'只放量突破' if zh else 'breakouts'}, "
+          f"{r['breakdowns']} {'只跌破支撑' if zh else 'breakdowns'}  ({r['how']})")
+    for h in r["hits"]:
+        mark = "▲" if h["kind"] == "breakout" else "▼"
+        zone = f"{h['zone'][0]:.2f}–{h['zone'][1]:.2f}" if h.get("zone") and h["zone"][0] is not None else ""
+        vr = f" 量比 {h['vol_ratio']:.1f}" if zh and h.get("vol_ratio") else (f" vol x{h['vol_ratio']:.1f}" if h.get("vol_ratio") else "")
+        extra = ""
+        if h.get("touches"):
+            extra += f" 触及{h['touches']}次" if zh else f" {h['touches']} touches"
+        if (h.get("zones_crossed") or 1) > 1:
+            extra += f" 连破{h['zones_crossed']}个区间" if zh else f" {h['zones_crossed']} zones crossed"
+        print(f"  {mark} {h['ticker']:10s} {h['name'][:8]:8s} {100 * h['pct']:+6.2f}%  "
+              f"{'区间' if zh else 'zone'} {zone}{extra}{vr}  {h['amount'] / 1e8:.1f}{'亿' if zh else '00M'}")
+    print("  " + r["note"])
+    return 0
+
+
 def cmd_screen(args) -> int:
     """Whole-market A-share screen (stage 1, no LLM), optionally tested on history."""
     from stockproof import research as rs
@@ -984,6 +1011,13 @@ def build_parser() -> argparse.ArgumentParser:
     mcpp.add_argument("--data-dir", default=DATA_DIR)
     mcpp.set_defaults(func=cmd_mcp)
 
+    brk = sub.add_parser("breakouts", help="whole-market A-share scan: today's support/resistance breakouts")
+    brk.add_argument("--direction", default="both", choices=["up", "down", "both"])
+    brk.add_argument("--top", type=int, default=60, help="how many of the most traded movers to chart (default 60)")
+    brk.add_argument("--lang", default="zh", choices=["en", "zh"])
+    brk.add_argument("--data-dir", default=DATA_DIR)
+    brk.set_defaults(func=cmd_breakouts)
+
     scr = sub.add_parser("screen", help="rank every A-share by earnings surprise, growth, ROE and momentum")
     scr.add_argument("--top", type=int, default=30)
     scr.add_argument("--min-cap", type=float, default=50.0, help="minimum market value, 亿元 (default 50)")
@@ -1062,6 +1096,7 @@ MENU = {
                     ("calendar", "未来两周谁发财报"),
                     ("schedule --time 21:00", "每晚自动更新（Mac / Windows / Linux）")]),
         ("选股与评分卡", [("screen", "全市场 A 股选股名单和理由"),
+                      ("breakouts", "全市场扫描：今天放量突破阻力 / 跌破支撑的股票"),
                       ("scorecard 600519", "证据评分卡：每个维度附出处和检验记录")]),
         ("研究与量化实验室", [("research --market cn", "财报事件研究和扣费回测"),
                         ("policy", "新闻联播政策信号研究"),
@@ -1080,6 +1115,7 @@ MENU = {
                             ("calendar", "who reports in the next two weeks"),
                             ("schedule --time 21:00", "run daily every evening (macOS / Windows / Linux)")]),
         ("Screen and scorecards", [("screen", "whole-market A-share shortlist with reasons"),
+                                   ("breakouts", "whole-market scan: today's breakouts / breakdowns"),
                                    ("scorecard 600519", "evidence scorecard with sources and track record")]),
         ("Research and the quant lab", [("research --market cn", "earnings event study and backtest"),
                                         ("policy", "新闻联播 policy-signal study"),

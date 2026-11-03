@@ -649,6 +649,9 @@ def make_handler(app: Dashboard, port: int):
                         return self._send(404, {"error": "not found"})
                     with open(p, encoding="utf-8") as f:
                         return self._send(200, f.read(), "text/html; charset=utf-8")
+                if url.path == "/api/breakouts":
+                    from stockproof import market_scan
+                    return self._send(200, market_scan.latest(app.data_dir) or {})
                 if url.path == "/api/screen":
                     return self._send(200, app.screen_page(self._lang(qs)))
                 if url.path == "/api/unusual":
@@ -729,6 +732,15 @@ def make_handler(app: Dashboard, port: int):
                     return self._send(200, app.explain_move(tk, day, app.settings["lang"]))
                 except LLMError as e:
                     return self._send(502, {"error": str(e)})
+            if path == "/api/breakouts":
+                if app.demo:
+                    return self._send(200, {"message": "demo"})
+                from stockproof import market_scan
+                lang = body.get("lang") if body.get("lang") in ("en", "zh") else app.settings["lang"]
+                try:
+                    return self._send(200, market_scan.scan(app.data_dir, lang=lang, log=lambda *a: None))
+                except Exception as e:
+                    return self._send(200, {"error": f"{type(e).__name__}: {str(e)[:160]}"})
             if path == "/api/lab/reset":
                 from stockproof import lab
                 lab.reset(app.data_dir)

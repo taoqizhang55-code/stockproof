@@ -147,7 +147,7 @@ def _date_label(item_date: str, day: str) -> str:
 
 
 def build_prompt(name: str, ticker: str, day: str, move: dict, items: list[dict], lang: str,
-                 attr: dict | None = None) -> str:
+                 attr: dict | None = None, peer: dict | None = None) -> str:
     language = "Simplified Chinese" if lang == "zh" else "English"
     lines = []
     for i, it in enumerate(items, 1):
@@ -164,6 +164,8 @@ def build_prompt(name: str, ticker: str, day: str, move: dict, items: list[dict]
                + "; ".join(parts) + ".\n")
     else:
         att = ""
+    from stockproof import peers
+    att += peers.prompt_line(peer)
     ev = "\n".join(lines) if lines else "(nothing found)"
     return (
         "You are a careful equity analyst explaining a stock's price move to an investor.\n"
@@ -175,7 +177,8 @@ def build_prompt(name: str, ticker: str, day: str, move: dict, items: list[dict]
         "Rules: use only the evidence above and cite it like [2]. Do not invent news, numbers or reasons. "
         "If the evidence does not explain the move, say so plainly (e.g. no company-specific news was found; "
         "the move may reflect the sector, the market or flows) — that is a valid answer. "
-        "If the market itself moved a lot, mention it. Start from the attribution: if the market and industry "
+        "If the market itself moved a lot, mention it. If peers are listed, say whether the stock moved with "
+        "its peers or alone. Start from the attribution: if the market and industry "
         "parts explain most of the move, say so; then explain only the stock's own part with the evidence. "
         "Items labelled background_Nd were published N days before the move: they are context, never call them "
         "news of that day ('当日'/'today').\n"
@@ -219,10 +222,15 @@ def explain(store, client, model_id: str, data_dir: str, ticker: str, day: str |
         attr = attribution(data_dir, ticker, day)
     except Exception:
         attr = None
-    out = {"ticker": ticker, "day": day, "move": move, "attribution": attr, "evidence": items}
+    try:
+        from stockproof import peers
+        peer = peers.compare(data_dir, ticker, day, move["ret"])
+    except Exception:
+        peer = None
+    out = {"ticker": ticker, "day": day, "move": move, "attribution": attr, "peers": peer, "evidence": items}
     if client is None:
         return out
-    data = client.chat_json(build_prompt(name, ticker, day, move, items, lang, attr))
+    data = client.chat_json(build_prompt(name, ticker, day, move, items, lang, attr, peer))
     valid = set(range(1, len(items) + 1))
     causes = []
     for c in (data.get("causes") or [])[:4]:

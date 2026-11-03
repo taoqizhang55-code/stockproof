@@ -19,6 +19,7 @@ from __future__ import annotations
 import datetime as dt
 import math
 import os
+import threading
 import time
 
 import numpy as np
@@ -102,8 +103,18 @@ def _nasdaq(sym: str, start: dt.date, assetclass: str = "stocks") -> pd.DataFram
     return _std(df)
 
 
+_DOWNLOAD_LOCK = threading.Lock()
+
+
 def download_bars(ticker: str, start: dt.date) -> pd.DataFrame:
-    """Daily OHLCV from `start`, newest last (forward-adjusted for A/HK/US stocks)."""
+    """Daily OHLCV from `start`, newest last (forward-adjusted for A/HK/US stocks).
+    One download at a time: some AKShare fallbacks (Sina) run a JavaScript engine that crashes the whole
+    process when two threads use it at once."""
+    with _DOWNLOAD_LOCK:
+        return _download_bars(ticker, start)
+
+
+def _download_bars(ticker: str, start: dt.date) -> pd.DataFrame:
     s8 = start.strftime("%Y%m%d")
     if ticker == "^SPX":
         try:
