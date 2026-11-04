@@ -85,6 +85,19 @@ class DashboardServer(unittest.TestCase):
         except urllib.error.HTTPError as e:
             return e.code, json.loads(e.read())
 
+    def test_paper_trading_api(self):
+        st, r = self.post("/api/paper", {"action": "new", "name": "t", "cash": 50000})
+        self.assertEqual(st, 200)
+        aid = r["id"]
+        st, o = self.post("/api/paper", {"action": "buy", "account": aid, "ticker": "mrk", "value": 10000})
+        self.assertIn("id", o)
+        d = self.get(f"/api/paper?id={aid}")
+        self.assertEqual(d["detail"]["account"]["name"], "t")
+        self.assertEqual(d["detail"]["pending"], 1)
+        self.assertTrue(any(a["id"] == aid for a in d["accounts"]))
+        self.assertEqual(self.post("/api/paper", {"action": "nope"})[1]["error"], "unknown action")
+        self.assertIn("recent", self.get("/api/alerts"))
+
     def test_page_and_state(self):
         with urllib.request.urlopen(f"http://127.0.0.1:{self.port}/") as r:
             self.assertIn("stockproof", r.read().decode())

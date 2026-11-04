@@ -40,6 +40,15 @@ How to use it well:
 - 国家队 / 社保 / 北向 / 险资 / 外资 买了什么, 资金地图 -> money_map(category); for the national team also call
   national_team_etf (since 2024 汇金 mostly buys broad ETFs, which top-10 holder lists never show). "Who holds X / 主力 / 龙虎榜" ->
   smart_money(ticker). Quarterly top-10 data is late and partial; main-force flow is an estimate: say so.
+- "分析一下 X" / "X 能买吗" / "give me a view on X" -> research_team; pass what the user wants discussed as `question`
+  in their words (e.g. "重点看扣非亏损会不会持续") (a cited multi-analyst view, logged and
+  scored later; never present it as advice or an order). "How accurate is the team?" -> team_track_record.
+- 模拟盘 / paper trading -> paper_trading(action=...): list, show, new, buy, sell, run, gap, strategy (a lab
+  experiment id), from_team (a team call id). Orders fill at the NEXT trading day's open under pessimistic rules
+  (limit-up/down, 5% of volume, impact, T+1); records are append-only. Never claim a paper order was a real one, and
+  never place real orders: stockproof has no broker connection. Only place a paper order when the user asks for it.
+- 提醒 / alerts / 盯盘 -> price_alerts (zone breaks, team plan levels reached, paper fills); not orders. For continuous
+  watching tell the user to run `stockproof alerts --watch` in a terminal.
 - "Why did X move?" -> why_did_it_move. "What changed in the latest report?" -> compare_with_last_report.
   "Who reports soon?" -> earnings_calendar. "Anything important today?" -> daily_digest.
 - Historical base rates (history_like, research_findings) are averages over many companies, not forecasts.
@@ -210,6 +219,17 @@ class Tools:
             r["daily"] = r["daily"][-20:]
         return self._clean(r)
 
+    def market_leverage(self, lang: str | None = None) -> dict:
+        from stockproof import margin
+        try:
+            r = margin.market(self.app.data_dir, 20)
+        except Exception as e:
+            return {"error": f"margin data unavailable ({type(e).__name__})"}
+        for x in r.values():
+            x.pop("daily", None)
+        return self._clean({**r, "note": "融资余额 = money borrowed to buy stocks. Totals compare only stocks eligible "
+                                         "on both days. Describe the trend; it is not a forecast."})
+
     def smart_money(self, ticker: str, lang: str | None = None) -> dict:
         from stockproof import cn, flows
         tk = self._tk(ticker)
@@ -223,6 +243,14 @@ class Tools:
             out["holders"] = {"error": f"{type(e).__name__}: {str(e)[:120]}"}
         out["dragon_tiger"] = flows.dragon_tiger(self.app.data_dir, tk, days=30)[:10]
         out["main_force_estimate"] = flows.main_force(self.app.data_dir, tk, days=20)
+        try:
+            from stockproof import margin
+            m = margin.stock(self.app.data_dir, tk, days=20)
+            if m and m.get("series"):
+                m["series"] = m["series"][-5:]
+            out["margin_financing"] = m
+        except Exception:
+            out["margin_financing"] = None
         out["note"] = ("Top-10 holders are quarterly and late; 龙虎榜 shows only days the stock hit an exchange "
                        "threshold; main-force flow is an order-size ESTIMATE. None of these has been history-tested "
                        "as a signal yet: present them as facts about who holds / traded, not as predictions.")
@@ -375,6 +403,102 @@ class Tools:
         card["refresh_problems"] = problems
         return self._clean(card)
 
+    def research_team(self, ticker: str, question: str | None = None, lang: str | None = None) -> dict:
+        from stockproof import team
+        from stockproof.store import Store
+        lang, tk = self._lang(lang), self._tk(ticker)
+        client, model_id = self._client()
+        if client is None:
+            return {"error": "the research team needs an LLM key (DEEPSEEK_API_KEY)"}
+        store = Store(self.app.data_dir)
+        try:
+            res = team.run(self.app, store, client, model_id, tk, lang, log=lambda *a: None, question=question)
+        except Exception as e:
+            return {"error": f"{type(e).__name__}: {str(e)[:200]}"}
+        team.score_calls(store, self.app.data_dir, fetch=False)
+        res["track_record"] = team.track_record(store, lang, limit=5)["summary"]
+        res.pop("evidence_full", None)
+        res["howto"] = ("Lead with the final stance + confidence + horizon, then the plan (levels are from the computed "
+                        "zones; they are things to watch, not orders), risks and what would change the view. Mention "
+                        "cap_note verbatim if present. Offer the analysts' and the debate's details on request. Cite "
+                        "evidence ids as given. Mention it was written to the forward log (call_id) and will be scored.")
+        return self._clean(res)
+
+    def paper_trading(self, action: str = "list", account: str | None = None, ticker: str | None = None,
+                      shares: int | None = None, value: float | None = None, name: str | None = None,
+                      cash: float | None = None, experiment_id: str | None = None, call_id: str | None = None,
+                      lang: str | None = None) -> dict:
+        from stockproof import paper
+        from stockproof.store import Store
+        store = Store(self.app.data_dir)
+        zh = self._lang(lang) == "zh"
+        rules = ("下一个交易日开盘成交，涨停不买、跌停不卖，最多当天成交量的 5%，冲击成本，T+1；记录不可修改。这是模拟盘，不是实盘委托。"
+                 if zh else "Fills at the next open; no buys at limit-up / sells at limit-down; 5% of volume; impact; T+1; "
+                 "append-only. Paper only, not a real order.")
+        try:
+            acct = paper.find_account(store, account) if account else None
+            if action in ("buy", "sell", "show", "gap", "from_team") and not acct:
+                return {"error": "no such paper account", "accounts": paper.accounts(store)}
+            if action == "new":
+                aid = paper.create_account(store, name or ("模拟盘" if zh else "paper"), cash or 1_000_000)
+                return {"id": aid, "rules": rules}
+            if action == "strategy":
+                if not experiment_id:
+                    return {"error": "give experiment_id (from lab_backtest / lab_experiments)"}
+                spec = paper.spec_from_experiment(self.app.data_dir, experiment_id)
+                aid = paper.create_strategy_account(store, self.app.data_dir, spec, cash or 1_000_000, name, self._lang(lang))
+                return {"id": aid, "account": paper.account(store, aid), "rules": rules,
+                        "howto": "From today on, each daily run places the strategy's orders; compare later with action=gap."}
+            if action in ("buy", "sell"):
+                tk = self._tk(ticker or "")
+                oid = paper.place(store, acct["id"], tk, action, shares=shares or 0, value=value or 0, source="agent")
+                return {"order_id": oid, "account": acct["name"], "ticker": tk, "rules": rules}
+            if action == "from_team":
+                import json as _json
+                from stockproof import team
+                store.conn.executescript(team.SCHEMA)
+                row = store.conn.execute("SELECT result FROM team_calls WHERE id=?", (call_id or "",)).fetchone()
+                if not row:
+                    return {"error": "no such team call id"}
+                call = {**_json.loads(row[0]), "call_id": call_id}
+                return {"order_id": paper.from_team_call(store, acct["id"], call, value or 100_000), "rules": rules}
+            if action == "run":
+                return self._clean(paper.run_all(store, self.app.data_dir, fetch=True, log=lambda *a: None))
+            if action == "gap":
+                return self._clean(paper.gap(store, self.app.data_dir, acct["id"]))
+            if action == "show":
+                st = paper.state(store, self.app.data_dir, acct["id"])
+                st["nav"] = st["nav"][-30:]
+                st["orders"] = st["orders"][-20:]
+                return self._clean(st)
+            out = []
+            for a in paper.accounts(store):
+                st = paper.state(store, self.app.data_dir, a["id"])
+                out.append({k: st.get(k) for k in ("value", "return", "benchmark_return", "excess", "max_drawdown", "pending")}
+                           | {"id": a["id"], "name": a["name"], "kind": a["kind"], "start_day": a["start_day"], "note": a["note"]})
+            return self._clean({"accounts": out, "rules": rules})
+        except Exception as e:
+            return {"error": f"{type(e).__name__}: {str(e)[:200]}"}
+
+    def price_alerts(self, check: bool = True, lang: str | None = None) -> dict:
+        from stockproof import alerts
+        from stockproof.store import Store
+        store = Store(self.app.data_dir)
+        lang = self._lang(lang)
+        new = alerts.watch(self.app, store, once=True, lang=lang, notify=False, log=lambda *a: None) if check else []
+        return self._clean({"new": new, "recent": alerts.recent(store, 20), "watching": alerts.watch_list(self.app, store),
+                            "market_open": alerts.market_open(),
+                            "note": (alerts.NOT_ORDER if lang == "zh" else alerts.NOT_ORDER_EN)
+                            + (" 持续盯盘：在终端运行 stockproof alerts --watch。" if lang == "zh" else
+                               " For continuous watching run `stockproof alerts --watch`.")})
+
+    def team_track_record(self, lang: str | None = None) -> dict:
+        from stockproof import team
+        from stockproof.store import Store
+        store = Store(self.app.data_dir)
+        n = team.score_calls(store, self.app.data_dir, fetch=True)
+        return self._clean({**team.track_record(store, self._lang(lang), limit=20), "newly_scored": n})
+
     def stockproof_menu(self, lang: str | None = None) -> dict:
         zh = self._lang(lang) == "zh"
         g = lambda name, tools, ask: {"group": name, "tools": tools, "try": ask}
@@ -383,8 +507,12 @@ class Tools:
                                   "company_announcements", "earnings_calendar", "daily_digest", "refresh_stock"],
                         ["我关注的股票今天怎么样？", "茅台最近有什么新闻和公告？", "宁德时代今天为什么跌？",
                          "腾讯这期财报和上期比变了什么？", "下周谁发财报？", "今天的简报"]),
-                      g("资金地图", ["money_map", "national_team_etf", "smart_money"],
-                        ["国家队这个季度买了什么？", "最近有没有国家队托底的迹象？", "社保基金加仓了哪些行业？", "科大讯飞的十大股东里有没有国家队？"]),
+                      g("AI 投研团队", ["research_team", "team_track_record"],
+                        ["让 AI 投研团队分析一下科大讯飞", "AI 团队过去的判断准不准？"]),
+                      g("模拟盘与提醒", ["paper_trading", "price_alerts"],
+                        ["建一个模拟盘，用 10 万模拟买入贵州茅台", "我的模拟盘跑赢沪深300 了吗？", "我的股票有没有突破或到达计划价位？"]),
+                      g("资金地图", ["money_map", "national_team_etf", "market_leverage", "smart_money"],
+                        ["国家队这个季度买了什么？", "最近有没有国家队托底的迹象？", "杠杆资金最近在加仓还是撤退？", "社保基金加仓了哪些行业？", "科大讯飞的十大股东里有没有国家队？"]),
                       g("选股与评分卡", ["screen_stocks", "scan_market", "evidence_scorecard"],
                         ["全市场业绩最强的 A 股有哪些？", "今天全市场哪些股票放量突破了？", "江波龙的证据评分卡"]),
                       g("量化实验室", ["lab_capabilities", "lab_backtest", "lab_confirm", "lab_similar", "lab_screen",
@@ -398,7 +526,11 @@ class Tools:
                                   "company_announcements", "earnings_calendar", "daily_digest", "refresh_stock"],
                         ["How are my stocks today?", "What's new with NVDA?", "Why did 300750 drop today?",
                          "What changed in Tencent's latest report?", "Who reports next week?"]),
-                      g("Smart money", ["money_map", "national_team_etf", "smart_money"],
+                      g("AI research team", ["research_team", "team_track_record"],
+                        ["Have the research team analyse NVDA", "How accurate has the team been?"]),
+                      g("Paper trading & alerts", ["paper_trading", "price_alerts"],
+                        ["Open a paper account and buy 10k of NVDA", "Is my paper account beating the index?", "Any alerts on my stocks?"]),
+                      g("Smart money", ["money_map", "national_team_etf", "market_leverage", "smart_money"],
                         ["What did the national team buy this quarter?", "Who holds 002230 among the big funds?"]),
                       g("Screen & scorecards", ["screen_stocks", "scan_market", "evidence_scorecard"],
                         ["Strongest A-shares by fundamentals?", "Which A-shares broke out today?", "Evidence scorecard for 301308"]),
@@ -484,7 +616,7 @@ Type `/stockproof` for ready-made requests.
 Information and research, not investment advice."""
 
     # ---------------------------------------------------------------- dashboard
-    TABS = ("home", "stocks", "digest", "screen", "money", "lab", "portfolio", "research")
+    TABS = ("home", "stocks", "digest", "team", "screen", "money", "paper", "lab", "portfolio", "research")
 
     def _dashboard_state(self, port: int) -> dict | None:
         import json as _json
@@ -516,7 +648,7 @@ Information and research, not investment advice."""
             time.sleep(0.2)
         return True
 
-    TOOL_TAB = {"money_map": "money", "smart_money": "money", "portfolio_checkup": "portfolio", "screen_stocks": "screen", "evidence_scorecard": "screen",
+    TOOL_TAB = {"paper_trading": "paper", "price_alerts": "paper", "research_team": "team", "team_track_record": "team", "money_map": "money", "smart_money": "money", "portfolio_checkup": "portfolio", "screen_stocks": "screen", "evidence_scorecard": "screen",
                 "daily_digest": "digest", "research_findings": "research", "watchlist": "stocks",
                 "stock_brief": "stocks", "why_did_it_move": "stocks", "compare_with_last_report": "stocks",
                 "company_announcements": "stocks", "refresh_stock": "stocks"}
@@ -708,6 +840,22 @@ PROMPTS = [
      "{x} 最近为什么涨跌？用 why_did_it_move，只根据当天前后的新闻、公告和财报解释，注明出处和把握程度。"),
     ("compare_reports", "看盘：财报和上期比变了什么", "What changed between the latest two reports", "ticker",
      "用 compare_with_last_report 看 {x} 最新一期财报和上一期相比，业绩、展望、风险、业务、分红有什么变化。"),
+    ("team", "AI 投研团队：分析一只股票", "Five AI analysts, a bull/bear debate and a PM's view, logged and scored later", "ticker",
+     "用 research_team 让 AI 投研团队分析 {x}：先说结论（观点、置信度、观察期）、观察计划和风险，说明置信度为什么是这个水平，"
+     "引用证据编号；说明这次判断已记入前瞻日志、到期会打分。不是买卖建议。"),
+    ("paper", "模拟盘：我的模拟账户", "Paper accounts vs the index, with holdings and orders", None,
+     "用 paper_trading（action=list，再对每个账户 action=show）看我的模拟盘：总资产、收益、和沪深300/标普500 比的超额、最大回撤、持仓和最近的订单；"
+     "如果有策略账户，用 action=gap 说明回测和模拟盘成交之间的差距。说明成交规则是悲观的，这是模拟盘不是实盘。"),
+    ("alerts", "提醒：突破、计划价位、成交", "Alerts: zone breaks, team plan levels, paper fills", None,
+     "用 price_alerts 检查我的股票：有没有突破/跌破支撑阻力区间、到达 AI 投研团队计划里的价位、模拟单成交或取消。说明提醒不是交易指令；"
+     "想持续盯盘就在终端运行 stockproof alerts --watch。"),
+    ("team_record", "AI 投研团队：过去准不准", "The research team's scored track record", None,
+     "用 team_track_record 看 AI 投研团队过去的判断和到期后的打分：总命中率、按置信度分的命中率、是否有衰减。样本少时要说明。"),
+    ("moneymap", "资金地图：国家队/社保/北向在买什么", "What the national team, pensions, northbound money... did this quarter", "conditions",
+     "用 money_map 看{x}这个季度在买什么、卖什么（没说就看国家队），按行业汇总，包括推断出的跌出前十；国家队还要用 national_team_etf 看 ETF 托底迹象。"
+     "一定要说出历史检验结果：跟着公开披露买，历史上有没有跑赢大盘。"),
+    ("breakouts", "全市场突破扫描", "Today's support/resistance breakouts across all A-shares", None,
+     "用 scan_market 扫描今天全市场放量突破阻力、跌破支撑的股票，列出区间、触及次数和量比；说明这是图形事实，不是买卖信号。"),
     ("scorecard", "选股：证据评分卡", "Evidence scorecard for a stock, with sources and what was validated", "ticker",
      "用 evidence_scorecard 看 {x} 的证据评分卡，说明哪些维度经过历史检验、主要利好和风险，并附出处。"),
     ("screen", "选股：全市场名单或自定义条件", "Whole-market A-share shortlist, or a custom screen", "conditions",
@@ -721,7 +869,7 @@ PROMPTS = [
      "用 portfolio_checkup 帮我体检持仓：{x}。用大白话解释集中度、同涨同跌、风险来源和历史大跌重演，不给买卖建议。"),
 ]
 ARG_ZH = {"ticker": "股票代码", "holdings": "持仓（代码 股数，比如 600519 100, AAPL 50；也可以发券商截图）",
-          "idea": "交易想法（用大白话写）", "conditions": "选股条件（可不写）"}
+          "idea": "交易想法（用大白话写）", "conditions": "条件（可不写）"}
 SKILL_MARK = ".stockproof-skill"
 
 
@@ -883,10 +1031,18 @@ def build_server(tools: Tools):
         return tools.national_team_etf(days, lang)
 
     @srv.tool()
+    def market_leverage(lang: str | None = None) -> dict:
+        """Leveraged money in A-shares (融资余额, 杠杆资金): the financing balance on Shanghai and Shenzhen over the last
+        20 trading days, its change, and the stocks where it rose or fell most. First call downloads ~20 days (a few
+        minutes), then cached. Use for "杠杆资金在加仓还是撤退", "融资余额". Facts, not a forecast."""
+        return tools.market_leverage(lang)
+
+    @srv.tool()
     def smart_money(ticker: str, lang: str | None = None) -> dict:
         """Who the smart money is in one A-share: national team / social security / insurers / QFII / northbound /
-        funds among its top-10 tradable holders (with this quarter's changes), recent 龙虎榜 days with institutions'
-        net buy, and the 20-day 'main force' flow ESTIMATE. Facts about holders, not a forecast."""
+        funds among its top-10 tradable holders (with this quarter's changes and inferred exits), recent 龙虎榜 days
+        with institutions' net buy, the 20-day margin-financing balance change (融资余额, leveraged money) and the
+        20-day 'main force' flow ESTIMATE. Facts about holders, not a forecast."""
         return tools.smart_money(ticker, lang)
 
     @srv.tool()
@@ -929,6 +1085,46 @@ def build_server(tools: Tools):
         reasons (earnings surprise, growth, ROE, trend), plus the rule's historical test. With `ticker`, where that
         one stock ranks (or why it isn't screened). A shortlist to research, not advice."""
         return tools.screen_stocks(top, ticker, lang)
+
+    @srv.tool()
+    def research_team(ticker: str, question: str | None = None, lang: str | None = None) -> dict:
+        """AI research team on one stock (AI 投研团队): five analysts (fundamentals, technicals, news, capital flow,
+        policy) each argue from their own numbered evidence, a bull and a bear researcher debate, and a portfolio
+        manager with the risk check gives a stance (bullish / bearish / neutral / no_view), confidence, horizon, a
+        watch plan with levels from the computed support/resistance zones, risks and what would change the view.
+        Confidence is capped at low unless a history-tested area supports the stance. Every call is saved in an
+        append-only forward log and scored against the market after its horizon. ~8 LLM calls, 30-60 s; one call
+        per stock per day for the same question. question: what the user wants the team to focus on, in their words
+        (e.g. "扣非亏损会不会持续"); the team answers it first. Use for "分析一下X", "X 能买吗", "给我一个观点". Not advice."""
+        return tools.research_team(ticker, question, lang)
+
+    @srv.tool()
+    def paper_trading(action: str = "list", account: str | None = None, ticker: str | None = None,
+                      shares: int | None = None, value: float | None = None, name: str | None = None,
+                      cash: float | None = None, experiment_id: str | None = None, call_id: str | None = None,
+                      lang: str | None = None) -> dict:
+        """Paper trading (模拟盘), never real money. action: list (accounts vs the index), show (one account: holdings,
+        orders, daily value vs CSI 300 / S&P 500), new (name, cash), buy / sell (account, ticker, shares or value),
+        run (fill pending orders and queue strategy orders), strategy (experiment_id from the lab: follow that
+        strategy on paper from today), gap (a strategy account: backtest rule vs actual paper fills, trade by trade),
+        from_team (call_id of a research-team call -> one paper order). Orders fill at the next trading day's open
+        with pessimistic rules: no buy at limit-up / sell at limit-down (waits up to 5 days), max 5% of the day's
+        volume, slippage + impact, commission (min 5 yuan), stamp duty, T+1, lots of 100. Append-only record.
+        Only place orders the user asked for."""
+        return tools.paper_trading(action, account, ticker, shares, value, name, cash, experiment_id, call_id, lang)
+
+    @srv.tool()
+    def price_alerts(check: bool = True, lang: str | None = None) -> dict:
+        """Alerts (提醒/盯盘): checks the watchlist, paper holdings and stocks with recent research-team calls against
+        live prices (Sina, during the session) or the last close: support/resistance zone breaks, research-team plan
+        levels reached, paper fills and cancellations. Each alert is recorded once. Alerts are not orders."""
+        return tools.price_alerts(check, lang)
+
+    @srv.tool()
+    def team_track_record(lang: str | None = None) -> dict:
+        """The research team's public track record: every past call from the append-only forward log, scored against
+        the market once its horizon passed (hit rate overall and by confidence, decay flag). Use for "AI 团队准不准"."""
+        return tools.team_track_record(lang)
 
     @srv.tool()
     def evidence_scorecard(ticker: str, refresh: bool = False, lang: str | None = None) -> dict:
@@ -999,7 +1195,7 @@ def build_server(tools: Tools):
     @srv.tool()
     def open_dashboard(tab: str = "home") -> dict:
         """Open stockproof's local dashboard (a web page with clickable charts, tables and forms) in the user's
-        browser, starting it in the background if needed. tab: home, stocks, digest, screen, money (smart-money map), lab,
+        browser, starting it in the background if needed. tab: home, stocks, digest, team (AI research team), screen, money (smart-money map), paper (paper trading and alerts), lab,
         portfolio or research. Use when the user asks for the dashboard / 网页看板 / 看板 / 网页版 / 仪表盘, or wants to browse results visually
         (e.g. tab="portfolio" after a check-up, tab="lab" after backtests)."""
         return tools.open_dashboard(tab)

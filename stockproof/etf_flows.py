@@ -26,6 +26,9 @@ KEY_ETFS = {
     "510050": "上证50ETF华夏", "510500": "中证500ETF南方", "512100": "中证1000ETF南方",
     "588000": "科创50ETF华夏", "588080": "科创50ETF易方达", "510180": "上证180ETF华安",
 }
+# Shenzhen-listed ones: the exchange only gives today's share counts, so snapshots accumulate from first use.
+KEY_ETFS_SZ = {"159919": "沪深300ETF嘉实", "159915": "创业板ETF易方达", "159922": "中证500ETF嘉实",
+               "159901": "深证100ETF易方达"}
 FLAG_MIN = 3e9          # yuan: a flagged day needs at least this much net creation across the key ETFs
 FLAG_Z = 3.0            # ... and this many standard deviations above the previous 60 days
 
@@ -59,6 +62,30 @@ def shares_on(data_dir: str, day: dt.date, fetch: bool = True) -> pd.DataFrame |
     return df
 
 
+def szse_snapshot(data_dir: str) -> bool:
+    """Save today's Shenzhen ETF share counts (the exchange offers no history). Retried; False if unreachable."""
+    import time
+    p = os.path.join(_dir(data_dir), f"szse_{dt.date.today():%Y%m%d}.csv")
+    if os.path.exists(p):
+        return True
+    for attempt in range(3):
+        try:
+            raw = cn._ak().fund_etf_scale_szse()
+            code = next(c for c in raw.columns if "代码" in c)
+            sh = next(c for c in raw.columns if "份额" in c)
+            pd.DataFrame({"code": raw[code].astype(str).str.zfill(6),
+                          "shares": pd.to_numeric(raw[sh], errors="coerce")}).to_csv(p, index=False)
+            return True
+        except Exception:
+            time.sleep(3 * (attempt + 1))
+    return False
+
+
+def _szse_shares(data_dir: str, d: dt.date) -> pd.DataFrame | None:
+    p = os.path.join(_dir(data_dir), f"szse_{d:%Y%m%d}.csv")
+    return pd.read_csv(p, dtype={"code": str}) if os.path.exists(p) else None
+
+
 def nav(data_dir: str, code: str, start: dt.date, fetch: bool = True) -> pd.Series:
     """Daily unit NAV of one ETF (cached a day)."""
     p = os.path.join(_dir(data_dir), f"nav_{code}.csv")
@@ -90,13 +117,17 @@ def daily(data_dir: str, days: int = 60, fetch: bool = True, log=print, start: d
         if df is None:
             missing += 1
             continue
-        rows[d] = df.set_index("code")["shares"].reindex(list(KEY_ETFS))
+        sz = _szse_shares(data_dir, d.date())
+        if sz is not None:
+            df = pd.concat([df, sz[sz["code"].isin(list(KEY_ETFS_SZ))]])
+        rows[d] = df.drop_duplicates("code").set_index("code")["shares"].reindex(list(KEY_ETFS) + list(KEY_ETFS_SZ))
         if fetch and i % 20 == 0:
             log(f"  ETF shares: {d.date()}")
     if not rows:
         return pd.DataFrame()
     sh = pd.DataFrame(rows).T.sort_index()
-    navs = pd.DataFrame({c: nav(data_dir, c, start, fetch) for c in KEY_ETFS}).reindex(sh.index).ffill()
+    sh = sh.dropna(axis=1, how="all")
+    navs = pd.DataFrame({c: nav(data_dir, c, start, fetch) for c in sh.columns}).reindex(sh.index).ffill()
     flow = sh.diff() * navs                                                    # yuan created (+) / redeemed (-)
     out = flow.rename(columns=lambda c: f"flow_{c}")
     out["total"] = flow.sum(axis=1, min_count=1)
@@ -118,13 +149,16 @@ def summary(data_dir: str, days: int = 60, lang: str = "zh", fetch: bool = True,
         return {"error": "ETF share data unavailable" if not zh else "暂时拿不到 ETF 份额数据"}
     recent = df.iloc[-days:]
     yi = 1e8
+    names = {**KEY_ETFS, **KEY_ETFS_SZ}
+    sz_days = int(recent[[f"flow_{c}" for c in KEY_ETFS_SZ if f"flow_{c}" in recent]].notna().any(axis=1).sum()) \
+        if any(f"flow_{c}" in recent for c in KEY_ETFS_SZ) else 0
 
     def day_row(d, r):
         return {"date": d.date().isoformat(), "net_creation": None if pd.isna(r["total"]) else float(r["total"]),
                 "csi300": None if pd.isna(r["csi300"]) else float(r["csi300"]),
                 "csi300_5d": None if pd.isna(r["csi300_5d"]) else float(r["csi300_5d"]),
                 "z": None if pd.isna(r["z"]) else round(float(r["z"]), 1), "flag": bool(r["flag"]),
-                "by_etf": {KEY_ETFS[c]: float(r[f"flow_{c}"]) for c in KEY_ETFS if pd.notna(r.get(f"flow_{c}"))}}
+                "by_etf": {names[c]: float(r[f"flow_{c}"]) for c in names if pd.notna(r.get(f"flow_{c}"))}}
     flagged = [day_row(d, r) for d, r in recent[recent["flag"]].iterrows()]
     return {
         "days": int(len(recent)), "from": recent.index[0].date().isoformat(), "to": recent.index[-1].date().isoformat(),
@@ -132,13 +166,14 @@ def summary(data_dir: str, days: int = 60, lang: str = "zh", fetch: bool = True,
         "down_day_creation": float(recent.loc[recent["csi300"] < 0, "total"].sum()),
         "flagged_days": flagged,
         "daily": [day_row(d, r) for d, r in recent.iterrows()],
-        "etfs": KEY_ETFS,
+        "etfs": names, "szse_days": sz_days,
         "rule": (f"疑似托底日：重点宽基 ETF 当天净申购至少 {FLAG_MIN / yi:.0f} 亿、是过去 60 个交易日波动的 {FLAG_Z:.0f} 倍以上，"
                  "且沪深300 当天下跌或近 5 个交易日累计跌超 3%。" if zh else
                  f"Flagged: key broad ETFs saw at least {FLAG_MIN / 1e9:.0f}B yuan of net creations, {FLAG_Z:.0f}+ standard "
                  "deviations above the previous 60 days, when the CSI 300 fell that day or 3%+ over 5 days."),
         "caveat": ("这是间接迹象：任何人都可以申购 ETF，标记只表示“符合国家队托底的特征”，不等于确认是国家队。"
-                   "目前只覆盖上交所上市的宽基 ETF（深交所的嘉实沪深300、创业板 ETF 暂未接入）。" if zh else
+                   + ("深交所的嘉实沪深300、创业板等 ETF 只能拿到当天份额，从开始使用起每天积累，"
+                      f"目前有 {sz_days} 天。" if zh else "") if zh else
                    "Indirect evidence: anyone can create ETF units; a flag means 'consistent with national-team buying', "
                    "not confirmed. Shanghai-listed ETFs only for now."),
     }

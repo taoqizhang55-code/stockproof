@@ -481,6 +481,173 @@ def cmd_mcp(args) -> int:
     return mcp_server.main(data_dir, args.provider, args.model, args.base_url, args.auto_dashboard)
 
 
+def cmd_team(args) -> int:
+    """The AI research team's view on one stock, or the team's track record."""
+    from stockproof import team
+    from stockproof.dashboard import Dashboard
+    from stockproof.llm import LLMClient
+    from stockproof.store import Store
+    zh = args.lang == "zh"
+    store = Store(args.data_dir)
+    if args.record or not args.ticker:
+        n = team.score_calls(store, args.data_dir)
+        r = team.track_record(store, args.lang)
+        s = r["summary"]
+        print(("团队战绩：" if zh else "Track record: ") + f"{s['calls']} calls, {s['scored']} scored"
+              + (f", hit rate {100 * s['hit_rate']:.0f}%" if s.get("hit_rate") is not None else "") + f" (+{n} new). {s['note']}")
+        for c in r["recent"][:15]:
+            out = "" if c.get("excess") is None else f" → {100 * c['excess']:+.1f}% vs market, {'hit' if c['hit'] else 'miss'}"
+            print(f"  {c['day']} {c['ticker']:10s} {c['stance']:8s} {c['confidence']:6s} {c['horizon']}d{out}")
+        return 0
+    client = LLMClient.from_provider(args.provider, args.model, args.base_url)
+    app = Dashboard(args.data_dir, args.provider, args.model, args.base_url)
+    tk = cn.canonical(args.ticker) if cn.is_cn(args.ticker) else args.ticker.upper()
+    print(("AI 投研团队正在分析 " if zh else "The research team is analysing ") + tk + " ...")
+    r = team.run(app, store, client, f"{args.provider}:{client.model}", tk, args.lang, force=args.force, question=args.ask)
+    f = r["final"]
+    print(f"\n{r['name']} ({tk}) · {f['stance']} · confidence {f['confidence']} · {f['horizon_days']}d"
+          + (" (today's, cached)" if r.get("cached") else ""))
+    roles = r.get("roles") or {}
+    print("\n  " + ("—— 5 位分析师 ——" if zh else "—— the five analysts ——"))
+    for k, a in r["analysts"].items():
+        first = a["points"][0] if a["points"] else None
+        print(f"  {roles.get(k, k)}: {a['view']} ({a['strength']:.2f})"
+              + (f" — {first['text'][:70]} {''.join('[' + e + ']' for e in first['evidence'])}" if first else ""))
+    print("  " + ("—— 多空辩论 ——" if zh else "—— the debate ——"))
+    for side in ("bull", "bear"):
+        c = (r.get(side) or {}).get("case") or []
+        if c:
+            print(f"  {roles.get(side, side)}: {c[0]['text'][:80]} {''.join('[' + e + ']' for e in c[0]['evidence'])}")
+        if (r.get(side) or {}).get("other_side_weakest"):
+            print(f"    {'对方最弱一点' if zh else 'other side weakest'}: {r[side]['other_side_weakest'][:90]}")
+    print("  " + ("—— 组合经理（含风控）——" if zh else "—— portfolio manager (with risk check) ——"))
+    print("  " + f["summary"])
+    for p in f["reasons"]:
+        print(f"  + {p['text']} {''.join('[' + e + ']' for e in p['evidence'])}")
+    for p in f["plan"]:
+        print(f"  ? {p['if']}" + (f" ({p['level']})" if p.get("level") is not None else "") + f" → {p['then']}")
+    for p in f["risks"]:
+        print(f"  ! {p['text']} {''.join('[' + e + ']' for e in p['evidence'])}")
+    if f.get("cap_note"):
+        print("  " + f["cap_note"])
+    print(f"  log id {r['call_id']} · " + r["disclaimer"])
+    return 0
+
+
+def _pct(x):
+    return "—" if x is None else f"{100 * x:+.2f}%"
+
+
+def cmd_paper(args) -> int:
+    """Paper trading: accounts, orders filled at later opens with pessimistic rules, NAV vs the market."""
+    import json as _json
+    from stockproof import paper
+    from stockproof.store import Store
+    zh = args.lang == "zh"
+    store = Store(args.data_dir)
+    a = args.action
+
+    def acct(ref):
+        x = paper.find_account(store, ref) if ref else None
+        if not x:
+            raise SystemExit(("没有这个模拟账户：" if zh else "no such paper account: ") + str(ref)
+                             + ("（用 stockproof paper list 查看）" if zh else " (see `stockproof paper list`)"))
+        return x
+    if a == "new":
+        aid = paper.create_account(store, args.name or "模拟盘", args.cash, args.market)
+        print(("已建模拟账户 " if zh else "Paper account ") + f"{aid} · {args.cash:,.0f}")
+        return 0
+    if a == "strategy":
+        spec = paper.spec_from_experiment(args.data_dir, args.exp) if args.exp else _json.loads(args.spec)
+        aid = paper.create_strategy_account(store, args.data_dir, spec, args.cash, args.name, args.lang)
+        print(("已建策略模拟账户 " if zh else "Strategy paper account ") + f"{aid}: {paper.account(store, aid)['note']}")
+        print("  " + ("从今天起，每天 `stockproof paper run` 按策略下单（daily 会自动跑）。" if zh else
+                      "From today on, `stockproof paper run` (also part of daily) places its orders."))
+        return 0
+    if a in ("buy", "sell"):
+        x = acct(args.account)
+        tk = cn.canonical(args.ticker) if cn.is_cn(args.ticker) else args.ticker.upper()
+        oid = paper.place(store, x["id"], tk, a, shares=args.shares or 0, value=args.value or 0, note=args.note or "")
+        print(("已下模拟单 " if zh else "Paper order ") + f"{oid}: {a} {tk} " + (f"{args.shares} shares" if args.shares else
+              f"{args.value or 0:,.0f}" if a == "buy" else "all"))
+        print("  " + ("下一个交易日开盘按悲观规则成交。这不是实盘委托。" if zh else
+                      "Fills at the next trading day's open under pessimistic rules. Not a real order."))
+        return 0
+    if a == "from-team":
+        row = store.conn.execute("SELECT result FROM team_calls WHERE id=?", (args.call,)).fetchone()
+        if not row:
+            raise SystemExit("no such team call")
+        call = _json.loads(row[0])
+        call["call_id"] = args.call
+        oid = paper.from_team_call(store, acct(args.account)["id"], call, args.value)
+        print(oid and (("已按投研团队观点下模拟单 " if zh else "Paper order from the team call ") + oid)
+              or ("团队观点是中性，没有下单。" if zh else "The call is neutral: no order."))
+        return 0
+    if a == "run":
+        r = paper.run_all(store, args.data_dir, fetch=True, log=print)
+        p = r["processed"]
+        print((f"成交 {p['filled']}、取消 {p['cancelled']}、等待 {p['waiting']}" if zh else
+               f"filled {p['filled']}, cancelled {p['cancelled']}, waiting {p['waiting']}")
+              + "".join(f"\n  {k}: {v}" for k, v in r["queued"].items()))
+        return 0
+    if a == "gap":
+        g = paper.gap(store, args.data_dir, acct(args.account)["id"])
+        print((f"{g['round_trips']} 笔完整交易，{g['missed_entries']} 笔没能买进" if zh else
+               f"{g['round_trips']} round trips, {g['missed_entries']} entries missed"))
+        if g.get("avg_gap") is not None:
+            print(f"  {'回测规则' if zh else 'backtest rule'} {_pct(g['avg_backtest_rule'])} · "
+                  f"{'模拟盘' if zh else 'paper'} {_pct(g['avg_paper'])} · {'差距' if zh else 'gap'} {_pct(g['avg_gap'])}")
+        print("  " + g["note"])
+        return 0
+    if a == "list" or (a == "show" and not args.account):
+        for x in paper.accounts(store):
+            s = paper.state(store, args.data_dir, x["id"])
+            print(f"  {x['id']}  {x['name'][:24]:24s} {x['kind']:8s} {s['value']:>14,.0f}  {_pct(s['return'])} "
+                  f"vs {_pct(s.get('benchmark_return'))}  {'since' if not zh else '起始'} {x['start_day']}")
+        if not paper.accounts(store):
+            print("还没有模拟账户：stockproof paper new --name 我的模拟盘" if zh else
+                  "No paper accounts yet: stockproof paper new --name mine")
+        return 0
+    s = paper.state(store, args.data_dir, acct(args.account)["id"])
+    ac = s["account"]
+    print(f"{ac['name']} ({ac['id']}) · {s['as_of']} · {s['value']:,.0f} · {_pct(s['return'])} vs "
+          f"{'沪深300' if ac['market'] == 'cn' else 'S&P 500'} {_pct(s.get('benchmark_return'))} · "
+          f"{'最大回撤' if zh else 'max drawdown'} {_pct(s['max_drawdown'])} · {'已付成本' if zh else 'costs paid'} {s['costs_paid']:,.0f}")
+    for h in s["holdings"]:
+        print(f"  {h['ticker']:10s} {h['shares']:>8d} @ {h['price']}  = {h['value'] or 0:,.0f}")
+    for o in s["orders"][-15:]:
+        st = o.get("status") or ("等待成交" if zh else "pending")
+        print(f"  {o['created_day']} {o['side']:4s} {o['ticker']:10s} → {st} {o.get('fill_day') or ''} "
+              f"{o.get('filled') or ''}{' @ ' + str(o['price']) if o.get('price') else ''} {o.get('reason') or ''}")
+    print("  " + s["rules"])
+    return 0
+
+
+def cmd_alerts(args) -> int:
+    """Real-time alerts: zone breaks, team plan levels, paper fills. Not orders."""
+    from stockproof import alerts
+    from stockproof.dashboard import Dashboard
+    from stockproof.store import Store
+    zh = args.lang == "zh"
+    store = Store(args.data_dir)
+    app = Dashboard(args.data_dir, "deepseek", None, None)
+    if args.watch:
+        print(("盯盘中（交易时段每 %d 秒取一次实时价），Ctrl-C 停止。" if zh else
+               "Watching (live prices every %d s during the session). Ctrl-C to stop.") % args.interval)
+        try:
+            alerts.watch(app, store, args.interval, lang=args.lang)
+        except KeyboardInterrupt:
+            pass
+        return 0
+    new = alerts.watch(app, store, once=True, lang=args.lang, notify=False, log=lambda *a: None)
+    rows = alerts.recent(store, args.limit)
+    print((f"新提醒 {len(new)} 条；最近 {len(rows)} 条：" if zh else f"{len(new)} new; the latest {len(rows)}:"))
+    for r in rows:
+        print(f"  {r['created_at'][:16]} {r['text']}")
+    print("  " + (alerts.NOT_ORDER if zh else alerts.NOT_ORDER_EN))
+    return 0
+
+
 def cmd_moneymap(args) -> int:
     """Smart-money map for one quarter, or one stock's big holders."""
     from stockproof import flows
@@ -501,6 +668,22 @@ def cmd_moneymap(args) -> int:
             print("  " + ("这段时间没有疑似托底日。" if zh else "No flagged days in this period."))
         print("  " + r["rule"])
         print("  " + r["caveat"])
+        return 0
+    if args.margin:
+        from stockproof import margin
+        print("融资余额（第一次要下载约 20 个交易日，几分钟）……" if zh else "Margin financing (first run downloads ~20 days) ...")
+        r = margin.market(args.data_dir, 20)
+        yi = lambda v: f"{v / 1e8:+,.0f}亿" if zh else f"{v / 1e9:+,.1f}B"
+        for ex, x in r.items():
+            name = {"sse": "沪市" if zh else "Shanghai", "szse": "深市" if zh else "Shenzhen"}[ex]
+            if not x.get("available"):
+                print(f"  {name}: " + ("暂时拿不到" if zh else "unavailable right now"))
+                continue
+            print(f"  {name} {x['from']} – {x['to']}: {yi(x['balance']).lstrip('+')}, "
+                  f"{'变化' if zh else 'change'} {yi(x['change'])} ({100 * x['change_pct']:+.1f}%)"
+                  + (f"，不含 {x['list_changes']} 只调出/调入融资标的的股票" if zh and x.get("list_changes") else ""))
+            print("    " + ("加杠杆最多：" if zh else "Most added: ") + ", ".join(f"{c} {yi(v)}" for c, v in x["top_add"][:6]))
+            print("    " + ("降杠杆最多：" if zh else "Most cut: ") + ", ".join(f"{c} {yi(v)}" for c, v in x["top_cut"][:6]))
         return 0
     if args.test:
         r = flows.history_tests(args.data_dir, refresh=True)
@@ -1079,10 +1262,49 @@ def build_parser() -> argparse.ArgumentParser:
     mcpp.add_argument("--data-dir", default=DATA_DIR)
     mcpp.set_defaults(func=cmd_mcp)
 
+    tm = sub.add_parser("team", help="AI research team: 5 analysts, a bull/bear debate and a PM's view (logged, scored later)")
+    tm.add_argument("ticker", nargs="?", help="stock to analyse (omit with --record)")
+    tm.add_argument("--record", action="store_true", help="show the team's scored track record")
+    tm.add_argument("--ask", help="what the team should focus on, e.g. \"扣非亏损会不会持续\"")
+    tm.add_argument("--force", action="store_true", help="run again even if today's call exists (adds a log entry)")
+    tm.add_argument("--lang", default="zh", choices=["en", "zh"])
+    tm.add_argument("--data-dir", default=DATA_DIR)
+    tm.add_argument("--provider", default="deepseek", choices=sorted(PROVIDERS))
+    tm.add_argument("--model")
+    tm.add_argument("--base-url")
+    tm.set_defaults(func=cmd_team)
+
+    pp = sub.add_parser("paper", help="paper trading: pessimistic fills, append-only record, NAV vs the market (no real orders)")
+    pp.add_argument("action", nargs="?", default="list",
+                    choices=["list", "new", "strategy", "buy", "sell", "run", "show", "gap", "from-team"])
+    pp.add_argument("account", nargs="?", help="account id or name (buy / sell / show / gap / from-team)")
+    pp.add_argument("ticker", nargs="?", help="stock (buy / sell)")
+    pp.add_argument("--shares", type=int)
+    pp.add_argument("--value", type=float, help="buy for about this much money")
+    pp.add_argument("--name")
+    pp.add_argument("--cash", type=float, default=1_000_000.0)
+    pp.add_argument("--market", default="cn", choices=["cn", "us"])
+    pp.add_argument("--spec", help="strategy: a lab spec JSON (earnings / forecast / smart_money)")
+    pp.add_argument("--exp", help="strategy: a lab experiment id")
+    pp.add_argument("--call", help="from-team: the team call's log id")
+    pp.add_argument("--note")
+    pp.add_argument("--lang", default="zh", choices=["en", "zh"])
+    pp.add_argument("--data-dir", default=DATA_DIR)
+    pp.set_defaults(func=cmd_paper)
+
+    al = sub.add_parser("alerts", help="real-time alerts: zone breaks, team plan levels, paper fills (not orders)")
+    al.add_argument("--watch", action="store_true", help="keep watching live prices during the session")
+    al.add_argument("--interval", type=int, default=60)
+    al.add_argument("--limit", type=int, default=20)
+    al.add_argument("--lang", default="zh", choices=["en", "zh"])
+    al.add_argument("--data-dir", default=DATA_DIR)
+    al.set_defaults(func=cmd_alerts)
+
     mm = sub.add_parser("moneymap", help="smart-money map: what the national team / pensions / QFII ... did this quarter")
     mm.add_argument("--category", default="national", choices=["national", "social", "northbound", "insurance", "qfii", "fund"])
     mm.add_argument("--quarter", help="quarter end YYYYMMDD (default: latest fully reported)")
     mm.add_argument("--ticker", help="instead: the big holders of one A-share")
+    mm.add_argument("--margin", action="store_true", help="instead: margin financing, market-wide and most changed")
     mm.add_argument("--test", action="store_true", help="instead: history test of buying after each kind's disclosed moves")
     mm.add_argument("--etf", action="store_true", help="instead: the national team's ETF channel (daily net creations)")
     mm.add_argument("--history", metavar="YEAR", help="download every quarter since YEAR (for history tests)")
@@ -1177,7 +1399,12 @@ MENU = {
         ("选股与评分卡", [("screen", "全市场 A 股选股名单和理由"),
                       ("breakouts", "全市场扫描：今天放量突破阻力 / 跌破支撑的股票"),
                       ("moneymap --category national", "资金地图：国家队/社保/北向/险资这个季度买卖了什么"),
+                      ("team 002230", "AI 投研团队：5 位分析师 + 多空辩论 + 组合经理的观点（记入前瞻日志）"),
                       ("scorecard 600519", "证据评分卡：每个维度附出处和检验记录")]),
+        ("模拟盘与提醒", [("paper new --name 我的模拟盘", "模拟盘：下一个交易日开盘成交、涨跌停不成交，记录不能改"),
+                      ("paper buy 我的模拟盘 600519 --value 100000", "下一笔模拟单（不是实盘委托）"),
+                      ("paper strategy --exp <实验id>", "让实验室里的策略从今天起跑模拟盘，看回测和实盘的差距"),
+                      ("alerts --watch", "盯盘：突破/跌破区间、到达投研团队的计划价位、模拟单成交")]),
         ("研究与量化实验室", [("research --market cn", "财报事件研究和扣费回测"),
                         ("policy", "新闻联播政策信号研究"),
                         ("lab caps", "实验室：能检验哪些想法"),
@@ -1197,7 +1424,12 @@ MENU = {
         ("Screen and scorecards", [("screen", "whole-market A-share shortlist with reasons"),
                                    ("breakouts", "whole-market scan: today's breakouts / breakdowns"),
                                    ("moneymap --category national", "smart-money map for the quarter"),
+                                   ("team NVDA", "AI research team view (logged and scored later)"),
                                    ("scorecard 600519", "evidence scorecard with sources and track record")]),
+        ("Paper trading and alerts", [("paper new --name mine", "paper account: next-open fills, limit rules, record can't be edited"),
+                                      ("paper buy mine AAPL --value 10000", "a paper order (not a real order)"),
+                                      ("paper strategy --exp <id>", "run a lab strategy on paper from today; see the backtest gap"),
+                                      ("alerts --watch", "live alerts: zone breaks, team plan levels, paper fills")]),
         ("Research and the quant lab", [("research --market cn", "earnings event study and backtest"),
                                         ("policy", "新闻联播 policy-signal study"),
                                         ("lab caps", "what the lab can test"),

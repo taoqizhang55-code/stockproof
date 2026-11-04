@@ -251,6 +251,83 @@ class Dashboard:
         return _clean(explain.explain(self._store(), client, model_id, self.data_dir, tk, day,
                                       self.name_of(tk), lang))
 
+    def paper_overview(self, aid: str | None = None) -> dict:
+        """Every paper account with its headline numbers; one account in full when `aid` is given."""
+        from stockproof import paper
+        store = self._store()
+        accts = []
+        for a in paper.accounts(store):
+            st = paper.state(store, self.data_dir, a["id"])
+            accts.append({k: st.get(k) for k in ("value", "return", "benchmark_return", "excess", "max_drawdown", "as_of",
+                                                 "pending", "cancelled")} | {"id": a["id"], "name": a["name"],
+                                                                             "kind": a["kind"], "note": a["note"],
+                                                                             "start_day": a["start_day"], "market": a["market"]})
+        out = {"accounts": accts}
+        if aid:
+            out["detail"] = paper.state(store, self.data_dir, aid)
+            if (paper.account(store, aid) or {}).get("kind") == "strategy":
+                out["gap"] = paper.gap(store, self.data_dir, aid)
+        return _clean(out)
+
+    def paper_action(self, body: dict) -> dict:
+        from stockproof import paper
+        store = self._store()
+        act = body.get("action")
+        zh = self.settings["lang"] == "zh"
+        if act == "new":
+            aid = paper.create_account(store, str(body.get("name") or ("模拟盘" if zh else "paper"))[:60],
+                                       float(body.get("cash") or 1_000_000), body.get("market") if body.get("market") in ("cn", "us") else "cn")
+            return {"id": aid}
+        if act == "strategy":
+            spec = paper.spec_from_experiment(self.data_dir, str(body.get("exp_id"))) if body.get("exp_id") else body.get("spec")
+            aid = paper.create_strategy_account(store, self.data_dir, spec, float(body.get("cash") or 1_000_000),
+                                                body.get("name"), self.settings["lang"])
+            return {"id": aid}
+        if act in ("buy", "sell"):
+            tk = str(body.get("ticker", "")).strip()
+            tk = cn.canonical(tk) if cn.is_cn(tk) else tk.upper()
+            if not re.fullmatch(r"[A-Z0-9.\-]{1,16}", tk):
+                return {"error": "bad ticker"}
+            oid = paper.place(store, str(body.get("account")), tk, act, shares=int(body.get("shares") or 0),
+                              value=float(body.get("value") or 0), note=str(body.get("note") or ""))
+            return {"id": oid}
+        if act == "from_team":
+            from stockproof import team
+            store.conn.executescript(team.SCHEMA)
+            row = store.conn.execute("SELECT result FROM team_calls WHERE id=?", (str(body.get("call_id")),)).fetchone()
+            if not row:
+                return {"error": "no such team call"}
+            call = json.loads(row[0])
+            call["call_id"] = body.get("call_id")
+            oid = paper.from_team_call(store, str(body.get("account")), call, float(body.get("value") or 100_000))
+            return {"id": oid} if oid else {"error": "团队观点是中性，没有下单" if zh else "neutral call: no order"}
+        if act == "run":
+            return _clean(paper.run_all(store, self.data_dir, fetch=not self.demo, log=lambda *a: None))
+        return {"error": "unknown action"}
+
+    def alerts_check(self, lang: str) -> dict:
+        from stockproof import alerts
+        store = self._store()
+        new = alerts.watch(self, store, once=True, lang=lang, notify=False, log=lambda *a: None) if not self.demo else []
+        return _clean({"new": new, "recent": alerts.recent(store, 50), "watching": alerts.watch_list(self, store),
+                       "open": alerts.market_open(), "note": alerts.NOT_ORDER if lang == "zh" else alerts.NOT_ORDER_EN})
+
+    def research_team(self, tk: str, lang: str, force: bool = False, question: str | None = None) -> dict:
+        from stockproof import team
+        store = self._store()
+        if self.demo:
+            team.score_calls(store, self.data_dir, fetch=False)
+            hit = store.conn.execute("SELECT result FROM team_calls WHERE ticker=? ORDER BY made_at DESC",
+                                     (tk,)).fetchone() if store.conn.execute(
+                "SELECT name FROM sqlite_master WHERE name='team_calls'").fetchone() else None
+            return _clean(json.loads(hit[0])) if hit else {"error": "demo"}
+        client = LLMClient.from_provider(self.provider, self.model_name, self.base_url)
+        model_id = f"{self.provider}:{client.model}"
+        res = team.run(self, store, client, model_id, tk, lang, log=self._log, force=force, question=question)
+        team.score_calls(store, self.data_dir, fetch=False)
+        res["track_record"] = team.track_record(store, lang, limit=8)
+        return _clean(res)
+
     def important_announcements(self, lang: str, days: int = 7) -> list[dict]:
         rows = announcements.recent(self._store(), [t for t in self.settings["watchlist"] if cn.is_cn(t)],
                                     days=days, min_importance=2, lang=lang)
@@ -466,7 +543,7 @@ class Dashboard:
             if self.job["running"]:
                 return False, "busy"
             tickers = list(self.settings["watchlist"])
-            if kind in ("screen", "moneymap", "etf"):
+            if kind in ("screen", "moneymap", "etf", "margin", "moneyhistory"):
                 tickers = [kind]                      # whole market, independent of the watchlist
             elif not tickers:
                 return False, "empty"
@@ -484,6 +561,23 @@ class Dashboard:
                 with self.lock:
                     self.job["current"] = kind
                 self._run_research(kind.split("_", 1)[1], lang)
+                with self.lock:
+                    self.job["done"] = 1
+                return
+            if kind == "margin":
+                from stockproof import margin
+                with self.lock:
+                    self.job["current"] = kind
+                margin.history(self.data_dir, 20, fetch=True)
+                with self.lock:
+                    self.job["done"] = 1
+                return
+            if kind == "moneyhistory":
+                from stockproof import flows
+                with self.lock:
+                    self.job["current"] = kind
+                r = flows.download_history(self.data_dir, "2016", log=self._log)
+                self._log(f"history: {len(r['downloaded'])} quarters downloaded, {len(r['failed'])} failed")
                 with self.lock:
                     self.job["done"] = 1
                 return
@@ -688,6 +782,30 @@ def make_handler(app: Dashboard, port: int):
                             pass
                     res["categories"] = {k: v[0 if lang == "zh" else 1] for k, v in flows.LABEL.items()}
                     return self._send(200, res)
+                if url.path == "/api/margin":
+                    from stockproof import margin
+                    return self._send(200, _clean(margin.market(app.data_dir, 20, fetch=False)))
+                if url.path == "/api/team/call":
+                    from stockproof import team
+                    store = app._store()
+                    store.conn.executescript(team.SCHEMA)
+                    row = store.conn.execute("SELECT result FROM team_calls WHERE id=?", ((qs.get("id") or [""])[0],)).fetchone()
+                    return self._send(200, json.loads(row[0]) if row else {"error": "not found"})
+                if url.path == "/api/paper":
+                    return self._send(200, app.paper_overview((qs.get("id") or [None])[0]))
+                if url.path == "/api/alerts":
+                    from stockproof import alerts
+                    return self._send(200, _clean({"recent": alerts.recent(app._store(), 50)}))
+                if url.path == "/api/team/record":
+                    from stockproof import team
+                    store = app._store()
+                    team.score_calls(store, app.data_dir, fetch=False)
+                    return self._send(200, _clean(team.track_record(store, self._lang(qs), limit=30)))
+                if url.path == "/api/moneyhistory":
+                    from stockproof import flows
+                    import re as _re
+                    n = len([f for f in os.listdir(flows.flows_dir(app.data_dir)) if _re.fullmatch(r"holders_\d{8}\.csv", f)])
+                    return self._send(200, {"quarters": n})
                 if url.path == "/api/etfflows":
                     from stockproof import etf_flows
                     r = etf_flows.summary(app.data_dir, 60, self._lang(qs), fetch=False, log=lambda *a: None)
@@ -703,6 +821,11 @@ def make_handler(app: Dashboard, port: int):
                     if not res.get("error"):
                         res["dragon_tiger"] = flows.dragon_tiger(app.data_dir, tk, days=30, fetch=not app.demo)[:8]
                         res["main_force"] = None if app.demo else flows.main_force(app.data_dir, tk, days=20)
+                        try:
+                            from stockproof import margin
+                            res["margin"] = margin.stock(app.data_dir, tk, days=20, fetch=False)
+                        except Exception:
+                            res["margin"] = None
                         nm = app.name_of(tk)
                         res["name"] = res.get("stock_name") or nm if nm == tk else nm
                     return self._send(200, _clean(res))
@@ -802,6 +925,33 @@ def make_handler(app: Dashboard, port: int):
                     return self._send(200, app.explain_move(tk, day, app.settings["lang"]))
                 except LLMError as e:
                     return self._send(502, {"error": str(e)})
+            if path == "/api/team":
+                from stockproof import team
+                text = str(body.get("text") or "")[:500]
+                tk = str(body.get("ticker", "")).upper() or (team.resolve(app, text) or "")
+                if not tk:
+                    zh = app.settings["lang"] == "zh"
+                    return self._send(200, {"error": "没认出是哪只股票：请写上股票名称或代码，比如“分析一下科大讯飞”或“600519 能买吗”。"
+                                            if zh else "Couldn't tell which stock: include its name or code, e.g. 'analyse NVDA'."})
+                if not re.fullmatch(r"[A-Z0-9.^\-]{1,16}", tk):
+                    return self._send(400, {"error": "bad ticker"})
+                try:
+                    return self._send(200, app.research_team(tk, app.settings["lang"], bool(body.get("force")),
+                                                             text or None))
+                except LLMError as e:
+                    return self._send(502, {"error": str(e)})
+                except Exception as e:
+                    return self._send(200, {"error": f"{type(e).__name__}: {str(e)[:160]}"})
+            if path == "/api/paper":
+                try:
+                    return self._send(200, app.paper_action(body))
+                except Exception as e:
+                    return self._send(200, {"error": f"{type(e).__name__}: {str(e)[:160]}"})
+            if path == "/api/alerts":
+                try:
+                    return self._send(200, app.alerts_check(app.settings["lang"]))
+                except Exception as e:
+                    return self._send(200, {"error": f"{type(e).__name__}: {str(e)[:160]}"})
             if path == "/api/breakouts":
                 if app.demo:
                     return self._send(200, {"message": "demo"})
@@ -860,7 +1010,8 @@ def make_handler(app: Dashboard, port: int):
                     return self._send(200, {"error": f"{type(e).__name__}: {str(e)[:160]}"})
             if path == "/api/refresh":
                 kind = body.get("kind")
-                if kind not in ("news", "earnings", "research_us", "research_cn", "screen", "moneymap", "etf"):
+                if kind not in ("news", "earnings", "research_us", "research_cn", "screen", "moneymap", "etf", "margin",
+                                "moneyhistory"):
                     return self._send(400, {"error": "unknown refresh kind"})
                 ok, msg = app.start_refresh(kind)
                 return self._send(200 if ok else 409, {"ok": ok, "message": msg})

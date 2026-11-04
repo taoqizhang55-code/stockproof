@@ -298,6 +298,28 @@ def daily(data_dir: str, provider: str, model: str | None, base_url: str | None,
         results[kind] = {"done": app.job["done"], "error": app.job["error"]}
         if app.job["error"]:
             break
+    try:                                     # market-wide data: ETF channel, margin, the quarter's holders
+        if os.environ.get("STOCKPROOF_MARKET_DATA", "1") == "0":
+            raise RuntimeError("disabled (STOCKPROOF_MARKET_DATA=0)")
+        from stockproof import etf_flows, flows, margin
+        etf_flows.szse_snapshot(data_dir)
+        etf_flows.daily(data_dir, 60, fetch=True, log=lambda *a: None)
+        margin.history(data_dir, 20, fetch=True)
+        flows.holders(data_dir, None, fetch=True, log=lambda *a: None)    # re-downloads only while reports come in
+        results["market_data"] = {"done": 1, "error": None}
+        print("market data: ETF shares, margin, holders updated", flush=True)
+    except Exception as e:
+        results["market_data"] = {"done": 0, "error": None, "warning": f"{type(e).__name__}: {e}"}
+        print(f"market data skipped: {type(e).__name__}: {str(e)[:120]}", flush=True)
+    try:                                     # paper trading: strategy orders, fills; then alerts
+        from stockproof import alerts, paper
+        st = app._store()
+        pr = paper.run_all(st, data_dir, fetch=True, log=lambda *a: None)
+        new = alerts.check(st, data_dir, alerts.watch_list(app, st), None, lang)
+        results["paper"] = {"done": 1, "error": None}
+        print(f"paper: {pr['processed']}; alerts: {len(new)} new", flush=True)
+    except Exception as e:
+        results["paper"] = {"done": 0, "error": None, "warning": f"{type(e).__name__}: {e}"}
     try:                                     # one-page digest + notification
         from stockproof import digest
         from stockproof.llm import LLMClient

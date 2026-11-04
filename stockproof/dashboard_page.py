@@ -130,7 +130,7 @@ BODY = """
   <div class="langs"><button data-lang="en">EN</button><button data-lang="zh">中文</button></div>
 </header>
 <div class="meta"><span id="model"></span><span id="daily"></span><span id="tip"></span></div>
-<nav class="tabs"><button data-tab="home" id="tab-home"></button><button data-tab="stocks" id="tab-stocks"></button><button data-tab="digest" id="tab-digest"></button><button data-tab="screen" id="tab-screen"></button><button data-tab="money" id="tab-money"></button><button data-tab="lab" id="tab-lab"></button><button data-tab="portfolio" id="tab-portfolio"></button><button data-tab="research" id="tab-research"></button></nav>
+<nav class="tabs"><button data-tab="home" id="tab-home"></button><button data-tab="stocks" id="tab-stocks"></button><button data-tab="digest" id="tab-digest"></button><button data-tab="team" id="tab-team"></button><button data-tab="screen" id="tab-screen"></button><button data-tab="money" id="tab-money"></button><button data-tab="paper" id="tab-paper"></button><button data-tab="lab" id="tab-lab"></button><button data-tab="portfolio" id="tab-portfolio"></button><button data-tab="research" id="tab-research"></button></nav>
 <div id="view-home" hidden>
   <p class="note" id="home-intro" style="margin:12px 0 0"></p>
   <div class="home" id="home-cards"></div>
@@ -193,6 +193,29 @@ BODY = """
   <span class="note" id="digest-note"></span>
 </div>
 </div>
+<div id="view-team" hidden>
+<section class="card">
+  <h2 id="team-h"></h2>
+  <p class="note" id="team-lead"></p>
+  <textarea id="team-input" rows="3" style="width:100%;box-sizing:border-box;font:inherit;padding:10px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--text)"></textarea>
+  <div class="toolbar" style="margin-top:8px"><button class="btn primary" id="team-go"></button><span id="team-ex"></span></div>
+  <div id="team-out"></div>
+</section>
+<section class="card" style="margin-top:12px"><h2 id="team-hist-h"></h2><div id="team-hist"></div></section>
+</div>
+<div id="view-paper" hidden>
+<section class="card">
+  <h2 id="pp-h"></h2>
+  <p class="note" id="pp-lead"></p>
+  <div class="toolbar"><input id="pp-name" class="btn" style="width:160px"><input id="pp-cash" class="btn" style="width:120px" value="1000000">
+    <button class="btn primary" id="pp-new"></button><button class="btn" id="pp-run"></button><span class="note" id="pp-msg"></span></div>
+  <div id="pp-accounts"></div>
+</section>
+<section class="card" style="margin-top:12px" id="pp-detail-card" hidden><div id="pp-detail"></div></section>
+<section class="card" style="margin-top:12px"><h2 id="al-h"></h2>
+  <div class="toolbar"><button class="btn" id="al-check"></button><span class="note" id="al-meta"></span></div>
+  <div id="al-list"></div></section>
+</div>
 <div id="view-money" hidden>
 <div class="toolbar">
   <div class="seg" id="mm-cats"></div>
@@ -203,6 +226,7 @@ BODY = """
   <section class="card" id="mm-body"></section>
   <section class="card detail" id="mm-detail"></section>
 </div>
+<section class="card" id="mm-margin" style="margin-top:12px"></section>
 </div>
 <div id="view-screen" hidden>
 <div class="toolbar">
@@ -302,7 +326,12 @@ function applyText() {
   $("#tab-research").textContent = tr("d_tab_research");
   $("#tab-digest").textContent = tr("d_tab_digest");
   $("#tab-screen").textContent = tr("d_tab_screen");
-  $("#tab-money").textContent = tr("d_tab_money"); $("#mm-download").textContent = tr("d_mm_download");
+  $("#tab-money").textContent = tr("d_tab_money");
+  $("#tab-paper").textContent = tr("d_tab_paper"); $("#pp-h").textContent = tr("d_pp_h"); $("#pp-lead").textContent = tr("d_pp_lead");
+  $("#pp-name").placeholder = tr("d_pp_name"); $("#pp-new").textContent = tr("d_pp_new"); $("#pp-run").textContent = tr("d_pp_run");
+  $("#al-h").textContent = tr("d_al_h"); $("#al-check").textContent = tr("d_al_check");
+  $("#tab-team").textContent = tr("d_tab_team"); $("#team-h").textContent = tr("d_team_page_h"); $("#team-lead").textContent = tr("d_team_page_lead");
+  $("#team-input").placeholder = tr("d_team_placeholder"); $("#team-go").textContent = tr("d_team_go"); $("#team-hist-h").textContent = tr("d_team_hist"); $("#mm-download").textContent = tr("d_mm_download");
   $("#tab-home").textContent = tr("d_tab_home"); $("#tab-lab").textContent = tr("d_tab_lab");
   $("#home-intro").textContent = tr("d_home_intro");
   for (const k of ["templates", "design"]) $("#lab-h-" + k).textContent = tr("d_lab_h_" + k);
@@ -339,7 +368,8 @@ function renderStatus() {
   if (busy) {
     prog.firstElementChild.style.width = (j.total ? 100 * j.done / j.total : 0) + "%";
     const cur = (j.kind || "").startsWith("research_") ? tr("d_tab_research") + " · " + tr("d_market_" + j.kind.slice(9))
-      : j.kind === "screen" ? tr("d_tab_screen") : j.kind === "moneymap" ? tr("d_tab_money") : j.kind === "etf" ? tr("d_etf_title") : (j.current || "…");
+      : j.kind === "screen" ? tr("d_tab_screen") : j.kind === "moneymap" ? tr("d_tab_money") : j.kind === "etf" ? tr("d_etf_title")
+      : j.kind === "margin" ? tr("d_margin_title") : j.kind === "moneyhistory" ? tr("d_mm_hist_title") : (j.current || "…");
     st.textContent = tr("d_running", {current: cur, done: j.done, total: j.total});
   } else if (j.error) {
     st.innerHTML = `<span class="err">${esc(tr("d_failed", {error: j.error}))}</span>`;
@@ -486,10 +516,12 @@ function priceHTML(d) {
     <span>${esc(tr("d_1w"))} ${pctChip(q.w1)}</span><span>${esc(tr("d_1m"))} ${pctChip(q.m1)}</span><span>${esc(tr("d_ytd"))} ${pctChip(q.ytd)}</span></div>
     ${spark(q.spark)}</div>`;
   if (!q.move) h += `<div class="move"><span class="note">${esc(tr("why_any_day", {day: q.date}))}</span>
-      <button class="btn" data-why="${esc(d.ticker)}" data-day="${esc(q.date)}">${esc(tr("d_why"))}</button></div><div id="why-box"></div>`;
+      <button class="btn" data-why="${esc(d.ticker)}" data-day="${esc(q.date)}">${esc(tr("d_why"))}</button>
+      <button class="btn primary" data-team="${esc(d.ticker)}">${esc(tr("d_team"))}</button></div><div id="why-box"></div><div id="team-box"></div>`;
   if (q.move) {
     h += `<div class="move"><span>⚡ ${esc(tr("d_move_line", {day: q.move.date, ret: pct(q.move.ret), excess: pct(q.move.excess)}))}</span>
-      <button class="btn" data-why="${esc(d.ticker)}" data-day="${esc(q.move.date)}">${esc(tr("d_why"))}</button></div><div id="why-box"></div>`;
+      <button class="btn" data-why="${esc(d.ticker)}" data-day="${esc(q.move.date)}">${esc(tr("d_why"))}</button>
+      <button class="btn primary" data-team="${esc(d.ticker)}">${esc(tr("d_team"))}</button></div><div id="why-box"></div><div id="team-box"></div>`;
   }
   return h;
 }
@@ -554,6 +586,147 @@ async function askCompare(tk) {
   catch (e) { box.innerHTML = `<p class="err">${esc(e.message)}</p>`; }
   btn.disabled = false;
 }
+
+const STANCE_CLS = {bullish: "positive", bearish: "negative", neutral: "neutral", no_view: "neutral"};
+function teamHTML(x) {
+  if (x.error) return `<p class="err">${esc(x.error === "demo" ? tr("d_demo_refresh") : x.error)}</p>`;
+  const R = x.roles || {}, ev = x.evidence || {}, f = x.final || {};
+  const cite = (refs) => (refs || []).map((r) => ev[r] && ev[r].link ? `<a href="${esc(ev[r].link)}" target="_blank" rel="noopener">[${esc(r)}]</a>` : `<span class="note" title="${esc(ev[r] ? ev[r].title + " — " + ev[r].text : "")}">[${esc(r)}]</span>`).join("");
+  const pts = (list) => (list || []).length ? `<ul class="pts">${list.map((p) => `<li>${esc(p.text)} ${cite(p.evidence)}</li>`).join("")}</ul>` : "";
+  let h = `<div class="histbox"><h3>${esc(tr("d_team_title"))} · ${esc(x.day || "")}${x.cached ? " · " + esc(tr("d_team_cached")) : ""}</h3>
+    <p><span class="chip ${STANCE_CLS[f.stance] || "neutral"}">${esc(tr("d_stance_" + f.stance))}</span>
+    <span class="chip neutral">${esc(tr("d_conf_" + f.confidence))}</span>
+    <span class="note">${esc(tr("d_team_horizon", {n: f.horizon_days}))}${x.price != null ? " · " + esc(tr("d_team_price", {p: x.price, d: x.price_date})) : ""}</span></p>
+    <p>${esc(f.summary || "")}</p>${pts(f.reasons)}`;
+  if (f.cap_note) h += `<p class="note" style="color:var(--neg)">⚠ ${esc(f.cap_note)}</p>`;
+  if ((f.plan || []).length) h += `<h3>${esc(tr("d_team_plan"))}</h3><ul class="pts">${f.plan.map((p) => `<li>${esc(p.if)}${p.level != null ? ` <b>(${esc(p.level)})</b>` : ""} → ${esc(p.then)}</li>`).join("")}</ul>`;
+  if ((f.risks || []).length) h += `<h3>${esc(tr("d_team_risks"))}</h3>${pts(f.risks)}`;
+  if ((f.would_change_view || []).length) h += `<p class="note">${esc(tr("d_team_change"))}：${esc(f.would_change_view.join("；"))}</p>`;
+  h += `<details><summary>${esc(tr("d_team_details"))}</summary>`;
+  for (const [k, a] of Object.entries(x.analysts || {})) {
+    h += `<p><b>${esc(R[k] || k)}</b> <span class="chip ${STANCE_CLS[a.view] || "neutral"}">${esc(tr("d_stance_" + a.view))}</span></p>${pts(a.points)}`;
+    const v = (x.validated || {})[k] || [];
+    if (v.length) h += `<p class="note">${esc(v.map((y) => (y.dim ? y.dim + ": " : "") + (y.text || "")).join(" · "))}</p>`;
+  }
+  h += `<p><b>${esc(R.bull || "bull")}</b></p>${pts((x.bull || {}).case)}<p class="note">${esc((x.bull || {}).other_side_weakest || "")}</p>`;
+  h += `<p><b>${esc(R.bear || "bear")}</b></p>${pts((x.bear || {}).case)}<p class="note">${esc((x.bear || {}).other_side_weakest || "")}</p></details>`;
+  const tr_ = (x.track_record || {}).summary;
+  if (tr_) h += `<p class="note">${esc(tr("d_team_record", {n: tr_.calls, s: tr_.scored, h: tr_.hit_rate != null ? Math.round(100 * tr_.hit_rate) + "%" : "—"}))} ${esc(tr_.note || "")}
+    <button class="btn sm" data-record="1">${esc(tr("d_rec_show"))}</button></p><div id="record-box"></div>`;
+  if (x.call_id && ["bullish", "bearish"].includes(f.stance)) h += `<p><button class="btn sm" data-paperteam="${esc(x.call_id)}">${esc(tr("d_pp_from_team"))}</button></p>`;
+  return h + `<p class="note">${esc(x.disclaimer || "")}</p></div>`;
+}
+
+function teamExamples() {
+  const first = S.watchlist[0], fname = first ? ((S.names || {})[first] || first) : "科大讯飞";
+  return [tr("d_team_ex1", {name: fname}), tr("d_team_ex2"), tr("d_team_ex3")];
+}
+
+async function loadTeamTab() {
+  $("#team-ex").innerHTML = teamExamples().map((q, i) => `<button class="btn sm" data-teamex="${i}">${esc(q)}</button>`).join(" ");
+  let r; try { r = await api(`/api/team/record?lang=${S.lang}`); } catch (e) { r = null; }
+  const rows = (r && r.recent) || [];
+  $("#team-hist").innerHTML = (rows.length ? `<table><tbody>` + rows.map((c) => `<tr class="team-row" data-callid="${esc(c.id)}" style="cursor:pointer">
+      <td class="num">${esc(c.day)}</td><td class="tk">${esc(c.ticker)}<small>${esc(c.name || "")}</small></td>
+      <td class="note">${esc(c.question || tr("d_team_noq"))}</td>
+      <td><span class="chip ${STANCE_CLS[c.stance] || "neutral"}">${esc(tr("d_stance_" + c.stance))}</span></td>
+      <td>${c.excess == null ? `<span class="note">${esc(c.counted ? tr("d_rec_pending") : tr("d_rec_notcounted"))}</span>` : `${pctChip(c.excess)} ${c.hit ? "✓" : "✗"}`}</td></tr>`).join("") + `</tbody></table>`
+    : `<p class="empty">${esc(tr("d_team_none"))}</p>`) + (r ? recordHTML({summary: r.summary, recent: []}) : "");
+}
+
+async function runTeamText(text) {
+  const out = $("#team-out"), btn = $("#team-go");
+  if (!text.trim()) return;
+  btn.disabled = true;
+  out.innerHTML = `<p class="note">${esc(tr("d_team_wait"))}</p>`;
+  let r; try { r = await api("/api/team", {text}); } catch (e) { r = {error: e.message}; }
+  btn.disabled = false;
+  out.innerHTML = (r.question ? `<p class="note">${esc(tr("d_team_q"))}：${esc(r.question)}</p>` : "") + teamHTML(r);
+  const det = out.querySelector("details"); if (det) det.open = true;
+  loadTeamTab();
+}
+
+async function askTeam(tk) {
+  const box = $("#team-box");
+  if (!box) return;
+  box.innerHTML = `<p class="note">${esc(tr("d_team_wait"))}</p>`;
+  try { box.innerHTML = teamHTML(await api("/api/team", {ticker: tk})); }
+  catch (e) { box.innerHTML = `<p class="err">${esc(e.message)}</p>`; }
+}
+
+// ---------- paper trading + alerts ----------
+let PP = null, ppSel = null;
+const money = (v) => v == null ? "—" : Math.round(v).toLocaleString();
+function navSVG(nav) {
+  if (!nav || nav.length < 2) return "";
+  const W = 640, H = 160, xs = (i) => 30 + i * (W - 40) / (nav.length - 1);
+  const vals = nav.flatMap((r) => [r[1], r[2]]).filter((v) => v != null), lo = Math.min(...vals), hi = Math.max(...vals), sp = (hi - lo) || 0.01;
+  const ys = (v) => 10 + (H - 30) * (1 - (v - lo) / sp);
+  const line = (k, col) => `<polyline fill="none" stroke="${col}" stroke-width="2" points="${nav.filter((r) => r[k] != null).map((r) => xs(nav.indexOf(r)) + "," + ys(r[k])).join(" ")}"/>`;
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;max-width:${W}px">${line(2, "var(--muted, #999)")}${line(1, "var(--accent)")}
+    <text x="30" y="${H - 4}" font-size="11" fill="currentColor">${esc(nav[0][0])}</text><text x="${W - 80}" y="${H - 4}" font-size="11" fill="currentColor">${esc(nav[nav.length - 1][0])}</text></svg>
+    <p class="note"><span style="color:var(--accent)">━</span> ${esc(tr("d_pp_nav"))} · <span style="color:#999">━</span> ${esc(tr("d_pp_bench"))}</p>`;
+}
+async function loadPaper(id) {
+  if (id !== undefined) ppSel = id;
+  try { PP = await api("/api/paper" + (ppSel ? "?id=" + encodeURIComponent(ppSel) : "")); } catch (e) { PP = {accounts: []}; }
+  const A = PP.accounts || [];
+  $("#pp-accounts").innerHTML = A.length ? `<table><thead><tr><th>${esc(tr("d_pp_acct"))}</th><th>${esc(tr("d_pp_value"))}</th><th>${esc(tr("d_pp_ret"))}</th><th>${esc(tr("d_pp_bench"))}</th><th>${esc(tr("d_pp_excess"))}</th><th>${esc(tr("d_pp_dd"))}</th><th></th></tr></thead><tbody>` +
+    A.map((a) => `<tr class="pp-row" data-pp="${esc(a.id)}" style="cursor:pointer"><td class="tk">${esc(a.name)}<small>${esc(a.kind === "strategy" ? tr("d_pp_strategy") : tr("d_pp_manual"))} · ${esc(tr("d_pp_since", {d: a.start_day}))}</small></td>
+      <td class="num">${money(a.value)}</td><td>${pctChip(a["return"])}</td><td>${a.benchmark_return == null ? "—" : pctChip(a.benchmark_return)}</td>
+      <td>${a.excess == null ? "—" : pctChip(a.excess)}</td><td class="num">${pct1(a.max_drawdown)}</td><td class="note">${a.pending ? esc(tr("d_pp_pending", {n: a.pending})) : ""}</td></tr>`).join("") + `</tbody></table>`
+    : `<p class="empty">${esc(tr("d_pp_none"))}</p>`;
+  const card = $("#pp-detail-card"), d = PP.detail;
+  card.hidden = !d;
+  if (!d) return;
+  const ac = d.account;
+  let h = `<h2>${esc(ac.name)} <small class="note">${esc(ac.id)} · ${esc(d.as_of)}</small></h2>${ac.note ? `<p class="note">${esc(ac.note)}</p>` : ""}
+    <div class="grid"><div class="kv"><b>${esc(tr("d_pp_value"))}</b>${money(d.value)}</div><div class="kv"><b>${esc(tr("d_pp_cash"))}</b>${money(d.cash)}</div>
+    <div class="kv"><b>${esc(tr("d_pp_ret"))}</b>${pctChip(d["return"])}</div><div class="kv"><b>${esc(tr("d_pp_excess"))}</b>${d.excess == null ? "—" : pctChip(d.excess)}</div>
+    <div class="kv"><b>${esc(tr("d_pp_costs"))}</b>${money(d.costs_paid)}</div></div>${navSVG(d.nav)}`;
+  h += `<div class="toolbar"><input id="pp-tk" class="btn" style="width:120px" placeholder="${esc(tr("d_pp_tk"))}"><input id="pp-val" class="btn" style="width:110px" placeholder="${esc(tr("d_pp_val"))}">
+    <input id="pp-sh" class="btn" style="width:90px" placeholder="${esc(tr("d_pp_sh"))}"><button class="btn primary" data-ppo="buy">${esc(tr("d_pp_buy"))}</button><button class="btn" data-ppo="sell">${esc(tr("d_pp_sell"))}</button></div>`;
+  if ((d.holdings || []).length) h += `<h3>${esc(tr("d_pp_hold"))}</h3><table><tbody>${d.holdings.map((x) => `<tr><td class="tk">${esc(x.ticker)}</td><td class="num">${x.shares}</td><td class="num">${esc(x.price)}</td><td class="num">${money(x.value)}</td></tr>`).join("")}</tbody></table>`;
+  const O = (d.orders || []).slice().reverse();
+  if (O.length) h += `<h3>${esc(tr("d_pp_orders"))}</h3><table><tbody>${O.map((o) => `<tr><td class="num">${esc(o.created_day)}</td><td>${esc(o.side === "buy" ? tr("d_pp_buy") : tr("d_pp_sell"))}</td><td class="tk">${esc(o.ticker)}</td>
+      <td>${o.status ? esc(o.status === "filled" ? tr("d_pp_filled", {d: o.fill_day, n: o.filled, p: o.price}) : tr("d_pp_cancelled")) : `<span class="note">${esc(tr("d_pp_wait"))}</span>`}</td><td class="note">${esc(o.reason || "")} ${esc(o.source && o.source !== "manual" ? o.source : "")}</td></tr>`).join("")}</tbody></table>`;
+  const g = PP.gap;
+  if (g) h += `<div class="histbox"><h3>${esc(tr("d_pp_gap_h"))}</h3><p>${esc(tr("d_pp_gap", {n: g.round_trips, m: g.missed_entries}))}${g.avg_gap != null ? " · " + esc(tr("d_pp_gap_v", {a: pct1(g.avg_backtest_rule), b: pct1(g.avg_paper), c: pct1(g.avg_gap)})) : ""}</p>
+    ${g.lab_backtest_ann_excess != null ? `<p class="note">${esc(tr("d_pp_gap_lab", {a: pct1(g.lab_backtest_ann_excess)}))}</p>` : ""}<p class="note">${esc(g.note)}</p></div>`;
+  $("#pp-detail").innerHTML = h + `<p class="note">${esc(d.rules)}</p>`;
+}
+async function ppAct(body) {
+  const msg = $("#pp-msg");
+  let r; try { r = await api("/api/paper", body); } catch (e) { r = {error: e.message}; }
+  msg.textContent = r.error ? r.error : (body.action === "run" ? tr("d_pp_ran", {f: r.processed.filled, c: r.processed.cancelled, w: r.processed.waiting}) : tr("d_pp_ok"));
+  if (r.id && ["new", "strategy"].includes(body.action)) ppSel = r.id;
+  return r;
+}
+async function loadPxAlerts(check) {
+  let r; try { r = check ? await api("/api/alerts", {}) : await api("/api/alerts"); } catch (e) { r = {recent: [], error: e.message}; }
+  $("#al-meta").textContent = r.error ? r.error : (check ? tr("d_al_meta", {n: (r.new || []).length, w: (r.watching || []).length}) + " " + (r.note || "") : tr("d_al_cli"));
+  const R = r.recent || [];
+  $("#al-list").innerHTML = R.length ? `<ul class="pts">${R.map((a) => `<li><span class="note">${esc(a.created_at.slice(5, 16).replace("T", " "))}</span> ${esc(a.text)}</li>`).join("")}</ul>` : `<p class="empty">${esc(tr("d_al_none"))}</p>`;
+}
+$("#pp-new").onclick = async () => { await ppAct({action: "new", name: $("#pp-name").value, cash: Number($("#pp-cash").value) || 1000000}); loadPaper(); };
+$("#pp-run").onclick = async () => { $("#pp-msg").textContent = tr("d_pp_running"); await ppAct({action: "run"}); loadPaper(); };
+$("#al-check").onclick = () => { $("#al-meta").textContent = "…"; loadPxAlerts(true); };
+document.addEventListener("click", async (e) => {
+  const row = e.target.closest("tr.pp-row");
+  if (row) return loadPaper(row.dataset.pp);
+  const o = e.target.closest("[data-ppo]");
+  if (o && ppSel) { await ppAct({action: o.dataset.ppo, account: ppSel, ticker: $("#pp-tk").value, value: Number($("#pp-val").value) || 0, shares: Number($("#pp-sh").value) || 0}); return loadPaper(); }
+  const pe = e.target.closest("[data-paperexp]");
+  if (pe) { const r = await ppAct({action: "strategy", exp_id: pe.dataset.paperexp}); if (r.error) { pe.insertAdjacentHTML("afterend", ` <span class="err">${esc(r.error)}</span>`); return; } showTab("paper"); return; }
+  const pt = e.target.closest("[data-paperteam]");
+  if (pt) {
+    let A = []; try { A = (await api("/api/paper")).accounts.filter((a) => a.kind === "manual"); } catch (err) {}
+    let aid = A.length ? A[A.length - 1].id : (await ppAct({action: "new", name: tr("d_pp_team_acct")})).id;
+    const r = await ppAct({action: "from_team", account: aid, call_id: pt.dataset.paperteam, value: 100000});
+    pt.insertAdjacentHTML("afterend", ` <span class="note">${esc(r.error || tr("d_pp_team_ok", {a: (A.length ? A[A.length - 1].name : tr("d_pp_team_acct"))}))}</span>`);
+    return;
+  }
+});
 
 async function askWhy(tk, day) {
   if (selected !== tk) { selected = tk; renderOverview(); await loadStock(); }
@@ -727,6 +900,8 @@ function showTab(t) {
   $("#view-home").hidden = t !== "home";
   $("#view-lab").hidden = t !== "lab";
   $("#view-money").hidden = t !== "money";
+  $("#view-team").hidden = t !== "team";
+  $("#view-paper").hidden = t !== "paper";
   $("#view-portfolio").hidden = t !== "portfolio";
   renderMoves(); renderAlerts(); renderAnns(); renderCalendar();
   history.replaceState(null, "", t === "home" ? location.pathname : "#" + t);
@@ -735,7 +910,9 @@ function showTab(t) {
   if (t === "screen") { loadScreen(); loadBreakouts(); }
   if (t === "home") renderHome();
   if (t === "lab") loadLabTab();
-  if (t === "money") loadMoney();
+  if (t === "money") { loadMoney(); loadMargin(); }
+  if (t === "team") loadTeamTab();
+  if (t === "paper") { loadPaper(); loadPxAlerts(); }
   if (t === "portfolio") loadPortfolioTab();
 }
 
@@ -808,6 +985,47 @@ function renderMoney() {
   renderMoneyDetail();
 }
 
+async function loadMargin() {
+  const box = $("#mm-margin");
+  if (!box) return;
+  let r; try { r = await api(`/api/margin?lang=${S.lang}`); } catch (e) { r = {}; }
+  const btn = `<button class="btn sm" id="margin-update">${esc(tr("d_etf_update"))}</button>`;
+  const ex = Object.entries(r || {}).filter(([, x]) => x && x.available);
+  let h = `<h2>${esc(tr("d_margin_title"))}</h2>`;
+  if (!ex.length) h += `<p class="note">${esc(tr("d_margin_need"))} ${btn}</p>`;
+  else {
+    h += ex.map(([k, x]) => {
+      const d = x.daily || [], vals = d.map((p) => p[1]), lo = Math.min(...vals), hi = Math.max(...vals);
+      const W = 240, H = 40, pts = d.map((p, i) => `${(i * W / Math.max(d.length - 1, 1)).toFixed(1)},${(H - 4 - (H - 8) * (p[1] - lo) / ((hi - lo) || 1)).toFixed(1)}`).join(" ");
+      const name = (n) => `${n[0]}${S.names && S.names[n[0]] ? " " + S.names[n[0]] : ""} ${yi(n[1])}`;
+      return `<p><b>${esc(tr("d_margin_" + k))}</b> ${esc(tr("d_margin_line", {a: x.from, b: x.to, v: yi(x.balance).replace("+", ""), c: yi(x.change), p: pct1(x.change_pct)}))}
+        ${x.list_changes ? `<span class="note">${esc(tr("d_margin_excl", {n: x.list_changes}))}</span>` : ""}</p>
+        <svg viewBox="0 0 ${W} ${H}" style="width:240px;height:40px"><polyline points="${pts}" fill="none" stroke="${x.change >= 0 ? "var(--pos)" : "var(--neg)"}" stroke-width="2"/></svg>
+        <p class="note">${esc(tr("d_margin_add"))}：${esc((x.top_add || []).slice(0, 6).map(name).join("，"))}<br>${esc(tr("d_margin_cut"))}：${esc((x.top_cut || []).slice(0, 6).map(name).join("，"))}</p>`;
+    }).join("") + `<p class="note">${esc(tr("d_margin_note"))} ${btn}</p>`;
+  }
+  let q = 0; try { q = (await api("/api/moneyhistory")).quarters || 0; } catch (e) { q = 0; }
+  if (q < 8) h += `<h3>${esc(tr("d_mm_hist_title"))}</h3><p class="note">${esc(tr("d_mm_hist_need", {n: q}))} <button class="btn sm" id="mm-hist">${esc(tr("d_mm_hist_btn"))}</button></p>`;
+  box.innerHTML = h;
+  const job = (kind) => async () => {
+    const x = await api("/api/refresh", {kind});
+    if (x.message === "demo") return alert(tr("d_demo_refresh"));
+    S = await api("/api/state"); renderStatus(); startPolling();
+  };
+  const b1 = $("#margin-update"); if (b1) b1.onclick = job("margin");
+  const b2 = $("#mm-hist"); if (b2) b2.onclick = job("moneyhistory");
+}
+
+function recordHTML(r) {
+  const s = (r && r.summary) || {};
+  let h = `<p>${esc(tr("d_team_record", {n: s.calls || 0, s: s.scored || 0, h: s.hit_rate != null ? Math.round(100 * s.hit_rate) + "%" : "—"}))}${s.decaying ? " ⚠ " + esc(tr("d_rec_decay")) : ""}</p><p class="note">${esc(s.note || "")}</p>`;
+  const rows = (r && r.recent) || [];
+  if (rows.length) h += `<table><tbody>` + rows.map((c) => `<tr><td class="num">${esc(c.day)}</td><td class="tk">${esc(c.ticker)}</td>
+    <td><span class="chip ${STANCE_CLS[c.stance] || "neutral"}">${esc(tr("d_stance_" + c.stance))}</span></td><td class="note">${esc(tr("d_conf_" + c.confidence))} · ${c.horizon}d</td>
+    <td>${c.excess == null ? `<span class="note">${esc(tr("d_rec_pending"))}</span>` : `${pctChip(c.excess)} ${c.hit ? "✓" : "✗"}`}</td></tr>`).join("") + `</tbody></table>`;
+  return h;
+}
+
 async function loadEtf() {
   const box = $("#mm-etf");
   if (!box) return;
@@ -857,6 +1075,9 @@ async function renderMoneyDetail(tk) {
   const lhb = r.dragon_tiger || [];
   if (lhb.length) h += `<h3>${esc(tr("d_mm_lhb"))}</h3><table><tbody>` + lhb.map((x) =>
     `<tr><td class="num">${esc(x.day)}</td><td>${pctChip(x.pct / 100)}</td><td class="note">${esc(x.note || x.reason || "")}${x.inst_net != null ? " · " + esc(tr("d_mm_inst", {v: yi(x.inst_net)})) : ""}</td></tr>`).join("") + `</tbody></table>`;
+  const mg = r.margin;
+  if (mg && mg.available) h += `<p class="note">${esc(tr("d_mm_margin", {a: mg.from, b: mg.to, v: yi(mg.balance).replace("+", ""), c: yi(mg.change), p: pct1(mg.change_pct)}))}</p>`;
+  else if (mg && mg.note) h += `<p class="note">${esc(mg.note)}</p>`;
   if (r.main_force) h += `<p class="note">${esc(tr("d_mm_mainforce", {d: r.main_force.days, v: yi(r.main_force.net), p: r.main_force.positive_days}))} ${esc(r.main_force.note || "")}</p>`;
   box.innerHTML = h;
 }
@@ -1056,8 +1277,21 @@ function homeCards() {
             ask: tr("d_home_q_why", {name: mv.name || mv.ticker})}
          : {label: tr("d_home_ex_watch"), act: "stocks", ask: tr("d_home_q_watch")},
       {label: tr("d_home_ex_digest"), act: "digest", ask: tr("d_home_q_digest")}]},
+    {icon: "🤖", key: "team", items: [
+      first ? {label: tr("d_home_ex_team", {name: fname}), act: "team", arg: first} : {label: tr("d_home_ex_add"), act: "stocks"},
+      {label: tr("d_home_ex_teamtab"), act: "teamtab"},
+      {label: tr("d_home_ex_record"), act: "record"}]},
+    {icon: "📒", key: "paper", items: [
+      {label: tr("d_home_ex_paper"), act: "paper"},
+      {label: tr("d_home_ex_paperlab"), act: "lab"},
+      {label: tr("d_home_ex_alerts"), act: "alerts"}]},
+    {icon: "💰", key: "money", items: [
+      {label: tr("d_home_ex_mm"), act: "money", arg: "national"},
+      {label: tr("d_home_ex_etf"), act: "money", arg: "national"},
+      {label: tr("d_home_ex_margin"), act: "margin"}]},
     {icon: "🔎", key: "screen", items: [
       {label: tr("d_home_ex_screen"), act: "screen", ask: tr("d_home_q_screen")},
+      {label: tr("d_home_ex_brk"), act: "breakouts"},
       {label: tr("d_home_ex_card"), act: "card", ask: tr("d_home_q_card")}]},
     {icon: "🧪", key: "lab", items: [
       {label: tr("d_preset_beat"), act: "preset", arg: "beat", ask: tr("d_preset_q_beat")},
@@ -1083,6 +1317,14 @@ async function homeAction(ci, i) {
   if (x.act === "digest") return showTab("digest");
   if (x.act === "screen") return showTab("screen");
   if (x.act === "lab") return showTab("lab");
+  if (x.act === "team") { showTab("stocks"); selected = x.arg; renderOverview(); await loadStock(); $("#detail").scrollIntoView({behavior: "smooth", block: "start"}); return askTeam(x.arg); }
+  if (x.act === "teamtab") return showTab("team");
+  if (x.act === "record") { out.innerHTML = `<p class="note">${esc(tr("d_lab_wait"))}</p>`; out.innerHTML = recordHTML(await api(`/api/team/record?lang=${S.lang}`)); return; }
+  if (x.act === "money") { mmCat = x.arg; showTab("money"); return; }
+  if (x.act === "paper") return showTab("paper");
+  if (x.act === "alerts") { showTab("paper"); return loadPxAlerts(true); }
+  if (x.act === "margin") { showTab("money"); setTimeout(() => { const m = $("#mm-margin"); if (m) m.scrollIntoView({behavior: "smooth"}); }, 800); return; }
+  if (x.act === "breakouts") { showTab("screen"); setTimeout(() => $("#run-breakouts").click(), 300); return; }
   if (x.act === "stock") { showTab("stocks"); selected = x.arg; renderOverview(); await loadStock(); $("#detail").scrollIntoView({behavior: "smooth", block: "start"}); return; }
   if (x.act === "why") { showTab("stocks"); return askWhy(x.arg, x.arg2); }
   if (x.act === "card") {
@@ -1215,6 +1457,7 @@ function labResultHTML(r) {
   if ((r.years || []).length) h += `<p class="note">${r.years.map((y) => `${y.year}: ${y.excess === null ? "—" : (y.excess > 0 ? "+" : "") + (100 * y.excess).toFixed(1) + "%"}`).join(" · ")}</p>`;
   h += `<div class="toolbar"><a class="btn primary" href="${esc(r.report_url)}" target="_blank" rel="noopener">${esc(tr("d_lab_open"))}</a>`;
   if (r.phase === "explore" && v.code === "passes") h += `<button class="btn" data-confirm="${esc(r.id)}">${esc(tr("d_lab_confirm"))}</button>`;
+  if (r.id && ["earnings", "forecast", "smart_money"].includes(r.spec.type)) h += `<button class="btn" data-paperexp="${esc(r.id)}">${esc(tr("d_pp_from_lab"))}</button>`;
   return h + `</div><p class="note">${esc(r.description)}</p>`;
 }
 
@@ -1262,7 +1505,7 @@ function startPolling() {
     const before = S.job.done;
     S = await api("/api/state"); renderStatus();
     if (S.job.done !== before) { rows = await api(`/api/overview?lang=${S.lang}`); renderOverview(); }
-    if (!S.job.running) { clearInterval(pollTimer); pollTimer = null; await loadAll(); if (tab === "money") loadMoney(); }
+    if (!S.job.running) { clearInterval(pollTimer); pollTimer = null; await loadAll(); if (tab === "money") { loadMoney(); loadMargin(); } }
   }, 1500);
 }
 
@@ -1332,6 +1575,21 @@ document.addEventListener("click", async (e) => {
     if (window.matchMedia("(max-width: 960px)").matches) box.scrollIntoView({behavior: "smooth", block: "start"});
     return;
   }
+  const tex = e.target.closest("[data-teamex]");
+  if (tex) { const q = teamExamples()[+tex.dataset.teamex]; $("#team-input").value = q; return runTeamText(q); }
+  const trow = e.target.closest("tr.team-row");
+  if (trow) {
+    const r = await api(`/api/team/call?id=${encodeURIComponent(trow.dataset.callid)}`);
+    const out = $("#team-out");
+    out.innerHTML = (r.question ? `<p class="note">${esc(tr("d_team_q"))}：${esc(r.question)}</p>` : "") + teamHTML(r);
+    const det = out.querySelector("details"); if (det) det.open = true;
+    out.scrollIntoView({behavior: "smooth", block: "start"});
+    return;
+  }
+  const rb = e.target.closest("[data-record]");
+  if (rb) { e.stopPropagation(); const b = $("#record-box"); if (b) b.innerHTML = recordHTML(await api(`/api/team/record?lang=${S.lang}`)); return; }
+  const teamBtn = e.target.closest("[data-team]");
+  if (teamBtn) { e.stopPropagation(); return askTeam(teamBtn.dataset.team); }
   const why = e.target.closest("[data-why]");
   if (why) { e.stopPropagation(); return askWhy(why.dataset.why, why.dataset.day); }
   const at = e.target.closest(".ann .tk");
@@ -1385,6 +1643,8 @@ $("#lab-add-filter").onclick = () => {
 };
 $("#lab-run").onclick = async () => { const b = $("#lab-run"); b.disabled = true; await runSpec(readSpec()); b.disabled = false; loadLabTab(); };
 $("#lab-reset").onclick = async () => { await api("/api/lab/reset", {}); CAPS = null; toast(tr("d_lab_reset_done")); loadLabTab(); };
+$("#team-go").onclick = () => runTeamText($("#team-input").value);
+$("#team-input").addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) runTeamText($("#team-input").value); });
 $("#mm-download").onclick = async () => {
   const r = await api("/api/refresh", {kind: "moneymap"});
   if (r.message === "demo") return alert(tr("d_demo_refresh"));
