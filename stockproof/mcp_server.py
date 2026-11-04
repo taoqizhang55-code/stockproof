@@ -37,6 +37,9 @@ How to use it well:
   its own line in your answer, exactly as given and not in a code block, then explain it. Only when that is
   missing, paste `text_chart` (a chart in characters) in a ``` code block. "Any signals today?" -> scan_signals (watchlist). "Which stocks broke out today?" / 全市场突破 /
   今天哪些股票放量突破 -> scan_market. Quote the rule given with each signal; these are observations, not orders.
+- 国家队 / 社保 / 北向 / 险资 / 外资 买了什么, 资金地图 -> money_map(category); for the national team also call
+  national_team_etf (since 2024 汇金 mostly buys broad ETFs, which top-10 holder lists never show). "Who holds X / 主力 / 龙虎榜" ->
+  smart_money(ticker). Quarterly top-10 data is late and partial; main-force flow is an estimate: say so.
 - "Why did X move?" -> why_did_it_move. "What changed in the latest report?" -> compare_with_last_report.
   "Who reports soon?" -> earnings_calendar. "Anything important today?" -> daily_digest.
 - Historical base rates (history_like, research_findings) are averages over many companies, not forecasts.
@@ -176,6 +179,53 @@ class Tools:
                 out["dashboard"] = self.open_dashboard(f"stock={tk}")
         else:
             out["chart"] = "follow the stock (refresh_stock) to see its candlestick chart in the dashboard"
+        return self._clean(out)
+
+    def money_map(self, category: str = "national", quarter: str | None = None, lang: str | None = None) -> dict:
+        from stockproof import flows
+        lang = self._lang(lang)
+        if category not in flows.LABEL:
+            return {"error": f"category must be one of {list(flows.LABEL)}"}
+        try:
+            out = flows.money_map(self.app.data_dir, category, quarter, lang=lang, log=lambda *a: None)
+            ht = flows.history_tests(self.app.data_dir, log=lambda *a: None)
+            if ht and category in ht.get("results", {}):
+                out["history_test"] = {"what": f"buy at the next close after the disclosure, hold {ht['hold_days']} days, "
+                                               f"vs equal-weighted CSI 300 members, after costs, before {ht['holdout_start']}",
+                                       **ht["results"][category]}
+                out["history_test_howto"] = ("Report this next to the map: copying these disclosed moves has NOT beaten "
+                                             "the market historically unless ann > 0 with t > 2. Say so plainly.")
+            return self._clean(out)
+        except Exception as e:
+            return {"error": f"holder data unavailable ({type(e).__name__}: {str(e)[:120]})"}
+
+    def national_team_etf(self, days: int = 60, lang: str | None = None) -> dict:
+        from stockproof import etf_flows
+        days = max(10, min(int(days), 250))
+        try:
+            r = etf_flows.summary(self.app.data_dir, days, self._lang(lang), log=lambda *a: None)
+        except Exception as e:
+            return {"error": f"ETF data unavailable ({type(e).__name__}: {str(e)[:120]})"}
+        if "daily" in r:
+            r["daily"] = r["daily"][-20:]
+        return self._clean(r)
+
+    def smart_money(self, ticker: str, lang: str | None = None) -> dict:
+        from stockproof import cn, flows
+        tk = self._tk(ticker)
+        if not cn.is_cn(tk) or cn.parse(tk)["market"] == "HK":
+            return {"error": "smart-money data is for China A-shares"}
+        lang = self._lang(lang)
+        out = {"ticker": tk, "name": self.app.name_of(tk)}
+        try:
+            out["holders"] = flows.stock_holders(self.app.data_dir, tk, quarters=2, lang=lang, log=lambda *a: None)
+        except Exception as e:
+            out["holders"] = {"error": f"{type(e).__name__}: {str(e)[:120]}"}
+        out["dragon_tiger"] = flows.dragon_tiger(self.app.data_dir, tk, days=30)[:10]
+        out["main_force_estimate"] = flows.main_force(self.app.data_dir, tk, days=20)
+        out["note"] = ("Top-10 holders are quarterly and late; 龙虎榜 shows only days the stock hit an exchange "
+                       "threshold; main-force flow is an order-size ESTIMATE. None of these has been history-tested "
+                       "as a signal yet: present them as facts about who holds / traded, not as predictions.")
         return self._clean(out)
 
     def _chart_image(self, tk: str, day: str, lang: str) -> str | None:
@@ -333,6 +383,8 @@ class Tools:
                                   "company_announcements", "earnings_calendar", "daily_digest", "refresh_stock"],
                         ["我关注的股票今天怎么样？", "茅台最近有什么新闻和公告？", "宁德时代今天为什么跌？",
                          "腾讯这期财报和上期比变了什么？", "下周谁发财报？", "今天的简报"]),
+                      g("资金地图", ["money_map", "national_team_etf", "smart_money"],
+                        ["国家队这个季度买了什么？", "最近有没有国家队托底的迹象？", "社保基金加仓了哪些行业？", "科大讯飞的十大股东里有没有国家队？"]),
                       g("选股与评分卡", ["screen_stocks", "scan_market", "evidence_scorecard"],
                         ["全市场业绩最强的 A 股有哪些？", "今天全市场哪些股票放量突破了？", "江波龙的证据评分卡"]),
                       g("量化实验室", ["lab_capabilities", "lab_backtest", "lab_confirm", "lab_similar", "lab_screen",
@@ -346,6 +398,8 @@ class Tools:
                                   "company_announcements", "earnings_calendar", "daily_digest", "refresh_stock"],
                         ["How are my stocks today?", "What's new with NVDA?", "Why did 300750 drop today?",
                          "What changed in Tencent's latest report?", "Who reports next week?"]),
+                      g("Smart money", ["money_map", "national_team_etf", "smart_money"],
+                        ["What did the national team buy this quarter?", "Who holds 002230 among the big funds?"]),
                       g("Screen & scorecards", ["screen_stocks", "scan_market", "evidence_scorecard"],
                         ["Strongest A-shares by fundamentals?", "Which A-shares broke out today?", "Evidence scorecard for 301308"]),
                       g("Quant lab", ["lab_capabilities", "lab_backtest", "lab_confirm", "lab_similar", "lab_screen",
@@ -368,17 +422,22 @@ class Tools:
 - 财报对比：最新两期相比，业绩、展望、风险、分红有什么变化 —— "腾讯这期财报和上期比变了什么？"
 - 公告监控、财报日历、每日简报 —— "下周谁发财报？" "今天的简报"
 
-**2. 选股与评分卡**
+**2. 资金地图**（A 股）
+- 国家队、社保、险资、外资、北向、公募这个季度新进/加仓/减仓了什么，按行业汇总 —— "国家队这个季度买了什么？"
+- 一只股票的十大股东里有没有"聪明钱"，近期龙虎榜机构买卖 —— "科大讯飞的十大股东里有没有国家队？"
+
+**3. 选股与评分卡**
 - 全市场 A 股选股名单，附理由，任意股票都能查排名 —— "全市场业绩最强的 A 股有哪些？"
+- 全市场突破扫描：今天放量突破阻力、跌破支撑的股票 —— "今天全市场哪些股票放量突破了？"
 - 证据评分卡：每个维度打分、附出处，并标明哪些经过历史检验 —— "江波龙的证据评分卡"
 
-**3. 量化实验室**（DeepSeek 自己做不到的：用十年真实数据现场回测）
+**4. 量化实验室**（DeepSeek 自己做不到的：用十年真实数据现场回测）
 - 回测任何交易想法，扣交易费用、考虑涨跌停，生成图文报告；多试几个版本会自动提高门槛，防止过拟合 —— "业绩大超预期后买入持有 20 天能赚钱吗？"
 - 类似情况历史上怎么走 —— "江波龙这种财报，之后一般怎么走？"
 - 按任意条件筛选全部 A 股 —— "找 ROE>20%、营收增长>30%、市盈率<30 的 A 股"
 - 新闻联播政策信号十年回看 —— "说加快发展半导体以后，电子行业表现如何？"
 
-**4. 持仓体检**
+**5. 持仓体检**
 - 集中度、哪些股票其实同涨同跌、风险从哪来、历史大跌重演 —— "帮我体检持仓：600519 100 股、00700 300 股、AAPL 50 股"（也可以直接发券商截图）
 
 ---
@@ -399,14 +458,17 @@ class Tools:
 filings and next report date; why a stock moved (cited); what changed between reports; announcements, earnings
 calendar, daily digest. Try: "How are my stocks today?", "Why did 300750 drop today?"
 
-**2. Screen & scorecards**: whole-market A-share shortlist with reasons; evidence scorecards with sources and which
+**2. Smart money** (A-shares): what the national team, pensions, insurers, QFII, northbound money and funds
+bought or sold this quarter, by industry; who the big holders of one stock are. Try: "What did the national team buy?"
+
+**3. Screen & scorecards**: whole-market breakout scan; whole-market A-share shortlist with reasons; evidence scorecards with sources and which
 dimensions passed history tests. Try: "Evidence scorecard for 301308"
 
-**3. Quant lab** (what an LLM can't do alone): backtest any idea on ten years of point-in-time data with costs and
+**4. Quant lab** (what an LLM can't do alone): backtest any idea on ten years of point-in-time data with costs and
 price limits, with a guard against overfitting; base rates after similar reports; custom screens; policy signals.
 Try: "Does buying after big earnings beats work after costs?"
 
-**4. Portfolio check-up**: concentration, holdings that move together, risk sources, crash replays.
+**5. Portfolio check-up**: concentration, holdings that move together, risk sources, crash replays.
 Try: "Check my portfolio: 600519 100, AAPL 50" (a broker screenshot works too)
 
 ---
@@ -422,7 +484,7 @@ Type `/stockproof` for ready-made requests.
 Information and research, not investment advice."""
 
     # ---------------------------------------------------------------- dashboard
-    TABS = ("home", "stocks", "digest", "screen", "lab", "portfolio", "research")
+    TABS = ("home", "stocks", "digest", "screen", "money", "lab", "portfolio", "research")
 
     def _dashboard_state(self, port: int) -> dict | None:
         import json as _json
@@ -454,7 +516,7 @@ Information and research, not investment advice."""
             time.sleep(0.2)
         return True
 
-    TOOL_TAB = {"portfolio_checkup": "portfolio", "screen_stocks": "screen", "evidence_scorecard": "screen",
+    TOOL_TAB = {"money_map": "money", "smart_money": "money", "portfolio_checkup": "portfolio", "screen_stocks": "screen", "evidence_scorecard": "screen",
                 "daily_digest": "digest", "research_findings": "research", "watchlist": "stocks",
                 "stock_brief": "stocks", "why_did_it_move": "stocks", "compare_with_last_report": "stocks",
                 "company_announcements": "stocks", "refresh_stock": "stocks"}
@@ -803,6 +865,31 @@ def build_server(tools: Tools):
         return tools.scan_market(direction, refresh, lang)
 
     @srv.tool()
+    def money_map(category: str = "national", quarter: str | None = None, lang: str | None = None) -> dict:
+        """Smart-money map of A-shares for one quarter (国家队/社保/险资/外资 资金地图): what one kind of investor did
+        in every company's top-10 tradable holders: new / added / reduced positions, by industry and by stock, with
+        estimated value changes. category: national (汇金/证金/梧桐树/国新/诚通), social (社保/养老金), northbound
+        (香港中央结算), insurance, qfii, fund. quarter: YYYYMMDD (default: the latest fully reported one). The first
+        call for a quarter downloads ~56k rows (about 2 minutes), then it is cached. Quarterly and up to 4 months
+        late: say so."""
+        return tools.money_map(category, quarter, lang)
+
+    @srv.tool()
+    def national_team_etf(days: int = 60, lang: str | None = None) -> dict:
+        """The national team's ETF channel (汇金买 ETF 托底): daily net creations in the big Shanghai-listed broad-index
+        ETFs (CSI 300, SSE 50, CSI 500/1000, STAR 50), valued at NAV, with days flagged where an unusually large net
+        creation came on a day the CSI 300 fell. Indirect evidence (anyone can create units): say "consistent with",
+        never "confirmed". The first call downloads ~4 months of daily share counts (a few minutes), then cached."""
+        return tools.national_team_etf(days, lang)
+
+    @srv.tool()
+    def smart_money(ticker: str, lang: str | None = None) -> dict:
+        """Who the smart money is in one A-share: national team / social security / insurers / QFII / northbound /
+        funds among its top-10 tradable holders (with this quarter's changes), recent 龙虎榜 days with institutions'
+        net buy, and the 20-day 'main force' flow ESTIMATE. Facts about holders, not a forecast."""
+        return tools.smart_money(ticker, lang)
+
+    @srv.tool()
     def compare_with_last_report(ticker: str, lang: str | None = None) -> dict:
         """What changed between the company's latest two earnings documents: results, outlook, risks,
         business, capital returns (each marked better/worse/neutral), risks named for the first time, tone
@@ -912,8 +999,8 @@ def build_server(tools: Tools):
     @srv.tool()
     def open_dashboard(tab: str = "home") -> dict:
         """Open stockproof's local dashboard (a web page with clickable charts, tables and forms) in the user's
-        browser, starting it in the background if needed. tab: home, stocks, digest, screen, lab, portfolio or
-        research. Use when the user asks for the dashboard / 网页看板 / 看板 / 网页版 / 仪表盘, or wants to browse results visually
+        browser, starting it in the background if needed. tab: home, stocks, digest, screen, money (smart-money map), lab,
+        portfolio or research. Use when the user asks for the dashboard / 网页看板 / 看板 / 网页版 / 仪表盘, or wants to browse results visually
         (e.g. tab="portfolio" after a check-up, tab="lab" after backtests)."""
         return tools.open_dashboard(tab)
 

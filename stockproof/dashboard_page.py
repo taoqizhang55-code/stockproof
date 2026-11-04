@@ -130,7 +130,7 @@ BODY = """
   <div class="langs"><button data-lang="en">EN</button><button data-lang="zh">中文</button></div>
 </header>
 <div class="meta"><span id="model"></span><span id="daily"></span><span id="tip"></span></div>
-<nav class="tabs"><button data-tab="home" id="tab-home"></button><button data-tab="stocks" id="tab-stocks"></button><button data-tab="digest" id="tab-digest"></button><button data-tab="screen" id="tab-screen"></button><button data-tab="lab" id="tab-lab"></button><button data-tab="portfolio" id="tab-portfolio"></button><button data-tab="research" id="tab-research"></button></nav>
+<nav class="tabs"><button data-tab="home" id="tab-home"></button><button data-tab="stocks" id="tab-stocks"></button><button data-tab="digest" id="tab-digest"></button><button data-tab="screen" id="tab-screen"></button><button data-tab="money" id="tab-money"></button><button data-tab="lab" id="tab-lab"></button><button data-tab="portfolio" id="tab-portfolio"></button><button data-tab="research" id="tab-research"></button></nav>
 <div id="view-home" hidden>
   <p class="note" id="home-intro" style="margin:12px 0 0"></p>
   <div class="home" id="home-cards"></div>
@@ -191,6 +191,17 @@ BODY = """
   <select id="digest-date" class="btn"></select>
   <button class="btn primary" id="make-digest"></button>
   <span class="note" id="digest-note"></span>
+</div>
+</div>
+<div id="view-money" hidden>
+<div class="toolbar">
+  <div class="seg" id="mm-cats"></div>
+  <button class="btn" id="mm-download" hidden></button>
+  <span class="note" id="mm-meta"></span>
+</div>
+<div class="cols" style="margin-top:12px">
+  <section class="card" id="mm-body"></section>
+  <section class="card detail" id="mm-detail"></section>
 </div>
 </div>
 <div id="view-screen" hidden>
@@ -291,6 +302,7 @@ function applyText() {
   $("#tab-research").textContent = tr("d_tab_research");
   $("#tab-digest").textContent = tr("d_tab_digest");
   $("#tab-screen").textContent = tr("d_tab_screen");
+  $("#tab-money").textContent = tr("d_tab_money"); $("#mm-download").textContent = tr("d_mm_download");
   $("#tab-home").textContent = tr("d_tab_home"); $("#tab-lab").textContent = tr("d_tab_lab");
   $("#home-intro").textContent = tr("d_home_intro");
   for (const k of ["templates", "design"]) $("#lab-h-" + k).textContent = tr("d_lab_h_" + k);
@@ -327,7 +339,7 @@ function renderStatus() {
   if (busy) {
     prog.firstElementChild.style.width = (j.total ? 100 * j.done / j.total : 0) + "%";
     const cur = (j.kind || "").startsWith("research_") ? tr("d_tab_research") + " · " + tr("d_market_" + j.kind.slice(9))
-      : j.kind === "screen" ? tr("d_tab_screen") : (j.current || "…");
+      : j.kind === "screen" ? tr("d_tab_screen") : j.kind === "moneymap" ? tr("d_tab_money") : j.kind === "etf" ? tr("d_etf_title") : (j.current || "…");
     st.textContent = tr("d_running", {current: cur, done: j.done, total: j.total});
   } else if (j.error) {
     st.innerHTML = `<span class="err">${esc(tr("d_failed", {error: j.error}))}</span>`;
@@ -714,6 +726,7 @@ function showTab(t) {
   $("#breakouts").hidden = t !== "screen" || !BRK;
   $("#view-home").hidden = t !== "home";
   $("#view-lab").hidden = t !== "lab";
+  $("#view-money").hidden = t !== "money";
   $("#view-portfolio").hidden = t !== "portfolio";
   renderMoves(); renderAlerts(); renderAnns(); renderCalendar();
   history.replaceState(null, "", t === "home" ? location.pathname : "#" + t);
@@ -722,10 +735,132 @@ function showTab(t) {
   if (t === "screen") { loadScreen(); loadBreakouts(); }
   if (t === "home") renderHome();
   if (t === "lab") loadLabTab();
+  if (t === "money") loadMoney();
   if (t === "portfolio") loadPortfolioTab();
 }
 
 // ---------- screen + evidence scorecards ----------
+// ---------- smart-money map ----------
+let MM = null, mmCat = "national", mmSel = null;
+const yi = (v) => v === null || v === undefined ? "—" : (S.lang === "zh" ? (v >= 0 ? "+" : "") + (v / 1e8).toFixed(1) + "亿"
+  : (v >= 0 ? "+" : "") + (v / 1e9).toFixed(2) + "B");
+async function loadMoney() {
+  try { MM = await api(`/api/moneymap?category=${mmCat}&lang=${S.lang}`); } catch (e) { MM = {error: e.message}; }
+  renderMoney();
+}
+
+function renderMoney() {
+  const cats = (MM && MM.categories) || {national: "国家队", social: "社保/养老金", northbound: "北向", insurance: "险资", qfii: "QFII", fund: "公募"};
+  $("#mm-cats").innerHTML = Object.entries(cats).map(([k, v]) => `<button data-mmcat="${esc(k)}" class="${k === mmCat ? "on" : ""}">${esc(v.replace(/（.*）/, ""))}</button>`).join("");
+  const body = $("#mm-body"), dl = $("#mm-download");
+  dl.hidden = !(MM && MM.need_download);
+  if (!MM) { body.innerHTML = ""; return; }
+  if (MM.error) { body.innerHTML = `<p class="err">${esc(MM.error)}</p>`; return; }
+  if (MM.need_download) { $("#mm-meta").textContent = ""; body.innerHTML = `<p class="empty">${esc(tr("d_mm_need", {q: MM.quarter}))}</p>`; renderMoneyDetail(); return; }
+  const c = MM.counts || {}, q = MM.quarter || "";
+  $("#mm-meta").textContent = tr("d_mm_meta", {q: `${q.slice(0, 4)}-${q.slice(4, 6)}-${q.slice(6)}`, n: MM.reported_companies});
+  let h = `<h2>${esc(MM.label || mmCat)}</h2><div class="grid">
+    <div class="kv"><b>${esc(tr("d_mm_stocks"))}</b>${MM.stocks || 0}</div>
+    <div class="kv"><b>${esc(tr("d_mm_new"))}</b>${c.new || 0}</div><div class="kv"><b>${esc(tr("d_mm_add"))}</b>${c.add || 0}</div>
+    <div class="kv"><b>${esc(tr("d_mm_reduce"))}</b>${c.reduce || 0}</div>
+    <div class="kv"><b>${esc(tr("d_mm_net"))}</b>${esc(yi(MM.net_value_change))}</div>
+    ${MM.exit_counts ? `<div class="kv"><b>${esc(tr("d_mm_exits_k"))}</b>${(MM.exit_counts.inferred || 0) + (MM.exit_counts.possible || 0)}</div>
+    <div class="kv"><b>${esc(tr("d_mm_inferred_k"))}</b>${esc(yi(MM.inferred_reduction))}</div>` : ""}</div>`;
+  const ht = MM.history_test;
+  if (ht && (ht.new || ht.add)) {
+    const one = (k) => ht[k] ? `${tr("d_mm_" + k)}：${tr("d_mm_ht_one", {a: pct1(ht[k].ann), t: ht[k].t != null ? ht[k].t.toFixed(1) : "—", n: ht[k].events, b: pct1(ht[k].ann_2x)})}` : "";
+    const good = [ht.new, ht.add].some((x) => x && x.ann > 0 && x.t >= 2);
+    h += `<div class="verdict ${good ? "passes" : "no_edge"}" style="margin:10px 0"><b>${esc(tr("d_mm_ht_title", {h: ht.hold_days}))}</b><br>${esc([one("new"), one("add")].filter(Boolean).join("；"))}<br><span class="note">${esc(tr(good ? "d_mm_ht_good" : "d_mm_ht_bad", {d: ht.holdout_start}))}</span></div>`;
+  }
+  if (mmCat === "national") h += `<div id="mm-etf"></div>`;
+  const inds = MM.industries || [];
+  if (inds.length) {
+    const mx = Math.max(...inds.map((i) => Math.abs(i.value_change))) || 1;
+    h += `<h3>${esc(tr("d_mm_by_ind"))}</h3><div>` + inds.map((i) => {
+      const w = 45 * Math.abs(i.value_change) / mx, pos = i.value_change >= 0;
+      return `<div style="display:flex;align-items:center;gap:8px;margin:3px 0;font-size:13px"><span style="width:110px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">${esc(i.industry)}</span>
+        <span style="flex:1;position:relative;height:14px"><span style="position:absolute;left:${pos ? 50 : 50 - w}%;width:${w}%;height:14px;border-radius:3px;background:${pos ? "var(--pos)" : "var(--neg)"};opacity:.75"></span>
+        <span style="position:absolute;left:50%;top:-2px;bottom:-2px;border-left:1px solid var(--line)"></span></span>
+        <span class="num" style="width:76px;text-align:right">${esc(yi(i.value_change))}</span><span class="note" style="width:56px">${esc(tr("d_mm_n", {n: i.stocks}))}</span></div>`;
+    }).join("") + `</div>`;
+  }
+  const table = (key, title) => {
+    const list = MM[key] || [];
+    if (!list.length) return "";
+    return `<h3>${esc(title)}</h3><div class="wide"><table><tbody>` + list.map((x) => {
+      const followed = S.watchlist.includes(x.ticker);
+      return `<tr class="mm-row ${x.ticker === mmSel ? "sel" : ""}" data-mm="${esc(x.ticker)}" style="cursor:pointer">
+        <td class="tk">${esc(x.ticker)}<small>${esc(x.name)} · ${esc(x.industry || "")}</small></td>
+        <td class="num">${esc(yi(x.value_change))}</td><td class="hide-sm note">${esc(tr("d_mm_public", {d: x.public}))}</td>
+        <td>${followed ? `<span class="note">${esc(tr("d_followed"))}</span>` : `<button class="btn sm" data-follow="${esc(x.ticker)}">${esc(tr("d_follow"))}</button>`}</td></tr>`;
+    }).join("") + `</tbody></table></div>`;
+  };
+  h += table("new", tr("d_mm_t_new")) + table("added", tr("d_mm_t_added")) + table("reduced", tr("d_mm_t_reduced"));
+  const ex = MM.exits || [];
+  if (ex.length) {
+    h += `<h3>${esc(tr("d_mm_t_exits", {q: MM.previous_quarter || ""}))}</h3><div class="wide"><table><tbody>` + ex.map((x) =>
+      `<tr class="mm-row" data-mm="${esc(x.ticker)}" style="cursor:pointer"><td class="tk">${esc(x.ticker)}<small>${esc(x.name)} · ${esc(x.holder)}</small></td>
+       <td><span class="chip ${x.confidence === "inferred" ? "negative" : "neutral"}">${esc(tr("d_mm_conf_" + x.confidence))}</span></td>
+       <td class="num">${x.confidence === "inferred" ? esc(yi(x.value_change)) : "—"}</td></tr>`).join("") + `</tbody></table></div>`;
+  } else if (!MM.previous_quarter) h += `<p class="note">${esc(tr("d_mm_no_prev"))}</p>`;
+  setTimeout(() => { if (mmCat === "national") loadEtf(); }, 0);
+  body.innerHTML = h + `<p class="note">${esc(MM.confidence_note || "")}</p><p class="note">${esc(MM.limits || "")}</p><p class="note">${esc(tr("d_mm_untested"))}</p>`;
+  renderMoneyDetail();
+}
+
+async function loadEtf() {
+  const box = $("#mm-etf");
+  if (!box) return;
+  let r; try { r = await api(`/api/etfflows?lang=${S.lang}`); } catch (e) { r = {error: e.message}; }
+  const btn = `<button class="btn sm" id="etf-update">${esc(tr("d_etf_update"))}</button>`;
+  if (r.need_download || r.error) {
+    box.innerHTML = `<h3>${esc(tr("d_etf_title"))}</h3><p class="note">${esc(tr("d_etf_need"))} ${btn}</p>`;
+  } else {
+    const d = r.daily || [], mx = Math.max(...d.map((x) => Math.abs(x.net_creation || 0))) || 1;
+    const W = 600, H = 90, bw = W / Math.max(d.length, 1);
+    const bars = d.map((x, i) => {
+      const v = x.net_creation || 0, hh = Math.abs(v) / mx * (H / 2 - 4), y = v >= 0 ? H / 2 - hh : H / 2;
+      const col = x.flag ? "var(--accent)" : v >= 0 ? "var(--pos)" : "var(--neg)";
+      return `<rect x="${(i * bw + 1).toFixed(1)}" y="${y.toFixed(1)}" width="${Math.max(1, bw - 2).toFixed(1)}" height="${Math.max(0.5, hh).toFixed(1)}" fill="${col}" opacity="${x.flag ? 1 : 0.6}"><title>${esc(x.date)} ${esc(yi(v))}${x.csi300 != null ? " · CSI300 " + (100 * x.csi300).toFixed(2) + "%" : ""}</title></rect>`;
+    }).join("");
+    const flags = (r.flagged_days || []).map((x) => `<li>${esc(x.date)} · ${esc(yi(x.net_creation))} · ${esc(tr("d_etf_csi", {r: x.csi300 != null ? (100 * x.csi300).toFixed(2) + "%" : "—"}))}</li>`).join("");
+    box.innerHTML = `<h3>${esc(tr("d_etf_title"))}</h3>
+      <p class="note">${esc(tr("d_etf_sum", {a: r.from, b: r.to, n: yi(r.net_creation), d: yi(r.down_day_creation)}))}${r.stale ? " · " + esc(tr("d_etf_stale")) : ""} ${btn}</p>
+      <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;max-height:120px"><line x1="0" x2="${W}" y1="${H / 2}" y2="${H / 2}" stroke="var(--line)"/>${bars}</svg>
+      ${flags ? `<p><b>${esc(tr("d_etf_flagged"))}</b></p><ul class="pts">${flags}</ul>` : `<p class="note">${esc(tr("d_etf_none"))}</p>`}
+      <p class="note">${esc(r.rule || "")} ${esc(r.caveat || "")}</p>`;
+  }
+  const b = $("#etf-update");
+  if (b) b.onclick = async () => {
+    const x = await api("/api/refresh", {kind: "etf"});
+    if (x.message === "demo") return alert(tr("d_demo_refresh"));
+    S = await api("/api/state"); renderStatus(); startPolling();
+  };
+}
+
+async function renderMoneyDetail(tk) {
+  const box = $("#mm-detail");
+  if (tk === undefined) { if (!mmSel) { box.innerHTML = `<p class="empty">${esc(tr("d_mm_pick"))}</p>`; } return; }
+  mmSel = tk;
+  box.innerHTML = `<p class="note">${esc(tr("d_lab_wait"))}</p>`;
+  let r; try { r = await api(`/api/smartmoney?ticker=${encodeURIComponent(tk)}&lang=${S.lang}`); } catch (e) { r = {error: e.message}; }
+  if (r.error) { box.innerHTML = `<p class="err">${esc(r.error)}</p>`; return; }
+  const act = {new: tr("d_mm_new"), add: tr("d_mm_add"), reduce: tr("d_mm_reduce"), same: tr("d_mm_same")};
+  let h = `<h2>${esc(tk)}${r.name ? " · " + esc(r.name) : ""}</h2><p>${esc(r.summary || "")}</p>`;
+  if ((r.exits || []).length) h += `<h3>${esc(tr("d_mm_t_exits", {q: r.previous_quarter || ""}))}</h3><table><tbody>` + r.exits.map((x) =>
+    `<tr><td><span class="chip neutral">${esc((x.label || "").replace(/（.*）/, ""))}</span> ${esc(x.display)}</td>
+     <td><span class="chip ${x.confidence === "inferred" ? "negative" : "neutral"}">${esc(tr("d_mm_conf_" + x.confidence))}</span></td>
+     <td class="note">${x.confidence === "inferred" ? esc(tr("d_mm_sold", {n: (x.sold_at_least / 1e4).toFixed(0)})) : ""}${x.now_at_most ? " " + esc(tr("d_mm_cap", {n: (x.now_at_most / 1e4).toFixed(0)})) : ""}</td></tr>`).join("") + `</tbody></table>`;
+  if ((r.holders || []).length) h += `<h3>${esc(tr("d_mm_top10"))}</h3><table><tbody>` + r.holders.map((x) =>
+    `<tr><td>${x.label ? `<span class="chip neutral">${esc(x.label.replace(/（.*）/, ""))}</span> ` : ""}${esc(x.display || x.holder)}</td>
+     <td class="note">${esc(act[x.action] || x.action || "")}${x.change_pct != null ? " " + (x.change_pct > 0 ? "+" : "") + Number(x.change_pct).toFixed(1) + "%" : ""}</td></tr>`).join("") + `</tbody></table>`;
+  const lhb = r.dragon_tiger || [];
+  if (lhb.length) h += `<h3>${esc(tr("d_mm_lhb"))}</h3><table><tbody>` + lhb.map((x) =>
+    `<tr><td class="num">${esc(x.day)}</td><td>${pctChip(x.pct / 100)}</td><td class="note">${esc(x.note || x.reason || "")}${x.inst_net != null ? " · " + esc(tr("d_mm_inst", {v: yi(x.inst_net)})) : ""}</td></tr>`).join("") + `</tbody></table>`;
+  if (r.main_force) h += `<p class="note">${esc(tr("d_mm_mainforce", {d: r.main_force.days, v: yi(r.main_force.net), p: r.main_force.positive_days}))} ${esc(r.main_force.note || "")}</p>`;
+  box.innerHTML = h;
+}
+
 let BRK = null;
 async function loadBreakouts() {
   try { const r = await api(`/api/breakouts?lang=${S.lang}`); BRK = r && r.hits ? r : null; } catch (e) { BRK = null; }
@@ -1127,7 +1262,7 @@ function startPolling() {
     const before = S.job.done;
     S = await api("/api/state"); renderStatus();
     if (S.job.done !== before) { rows = await api(`/api/overview?lang=${S.lang}`); renderOverview(); }
-    if (!S.job.running) { clearInterval(pollTimer); pollTimer = null; await loadAll(); }
+    if (!S.job.running) { clearInterval(pollTimer); pollTimer = null; await loadAll(); if (tab === "money") loadMoney(); }
   }, 1500);
 }
 
@@ -1176,7 +1311,16 @@ document.addEventListener("click", async (e) => {
             let r; try { r = await api("/api/lab/confirm", {id: cf.dataset.confirm}); } catch (err) { r = {error: err.message}; }
             labLast = r; $("#lab-result").innerHTML = labResultHTML(r); CAPS = null; return loadLabTab(); }
   const fb = e.target.closest("[data-follow]");
-  if (fb) { e.stopPropagation(); fb.disabled = true; return follow(fb.dataset.follow); }
+  if (fb) { e.stopPropagation(); fb.disabled = true; await follow(fb.dataset.follow); if (tab === "money") renderMoney(); return; }
+  const mc = e.target.closest("[data-mmcat]");
+  if (mc) { mmCat = mc.dataset.mmcat; mmSel = null; return loadMoney(); }
+  const mr = e.target.closest("tr.mm-row");
+  if (mr) {
+    document.querySelectorAll("tr.mm-row").forEach((x) => x.classList.toggle("sel", x === mr));
+    await renderMoneyDetail(mr.dataset.mm);
+    if (window.matchMedia("(max-width: 960px)").matches) $("#mm-detail").scrollIntoView({behavior: "smooth", block: "start"});
+    return;
+  }
   const cb = e.target.closest("[data-card]");
   if (cb) { e.stopPropagation(); return askCard(cb.dataset.card, cb.dataset.refresh === "1", cb.closest("#screen-detail") || cb.closest("#stock-card")); }
   const sr = e.target.closest("tr.sc-row");
@@ -1241,6 +1385,11 @@ $("#lab-add-filter").onclick = () => {
 };
 $("#lab-run").onclick = async () => { const b = $("#lab-run"); b.disabled = true; await runSpec(readSpec()); b.disabled = false; loadLabTab(); };
 $("#lab-reset").onclick = async () => { await api("/api/lab/reset", {}); CAPS = null; toast(tr("d_lab_reset_done")); loadLabTab(); };
+$("#mm-download").onclick = async () => {
+  const r = await api("/api/refresh", {kind: "moneymap"});
+  if (r.message === "demo") return alert(tr("d_demo_refresh"));
+  S = await api("/api/state"); renderStatus(); startPolling();
+};
 $("#run-breakouts").onclick = async () => {
   const btn = $("#run-breakouts"); btn.disabled = true;
   renderBreakouts(tr("d_brk_wait"));

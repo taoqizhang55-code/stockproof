@@ -229,3 +229,39 @@ def test_scaled_costs_and_fragile_flag():
     v = lab._warn({"code": "passes", "text": "ok"}, st, None, "zh")
     assert v["warnings"] and "脆弱" in v["text"]
     assert lab._warn({"code": "no_edge", "text": "x"}, st, None, "zh")["warnings"] == []
+
+
+def test_smart_money_events_in_the_lab(tmp_path):
+    """National-team new positions (no planted effect); the lab trades them only after 公告日."""
+    from stockproof import flows
+    d = _setup(tmp_path, effect=0.0)
+    px = pd.read_csv(os.path.join(d, "prices_cn.csv"), index_col=0, parse_dates=True)
+    rng = np.random.default_rng(5)
+    fd = os.path.join(d, "flows")
+    os.makedirs(fd)
+    quarters = pd.date_range("2016-03-31", dt.date.today() - pd.Timedelta(days=120), freq="QE")
+    for q in quarters:
+        public = (q + pd.Timedelta(days=28))
+        i = px.index.searchsorted(public)
+        if i + 30 >= len(px):
+            continue
+        rows = []
+        for j, tk in enumerate(px.columns):
+            act = "新进" if rng.random() < 0.2 else "不变"
+            rows.append(("中央汇金投资有限责任公司" if act == "新进" else "张三", "其它" if act == "新进" else "个人",
+                         tk[:6], tk, q.strftime("%Y-%m-%d"), 1e6, 1e6 if act == "新进" else 0, None, act, 1e7,
+                         px.index[i].strftime("%Y-%m-%d")))
+        raw = pd.DataFrame(rows, columns=["序号", "股东名称", "股东类型", "股票代码", "股票简称", "报告期", "期末持股-数量",
+                                          "期末持股-数量变化", "期末持股-数量变化比例", "期末持股-持股变动",
+                                          "期末持股-流通市值", "公告日"][1:])
+        flows._normalize(raw).to_csv(os.path.join(fd, f"holders_{q:%Y%m%d}.csv"), index=False)
+    ev = flows.events(d, log=lambda *a: None)
+    assert set(ev["category"]) == {"national"} and set(ev["action"]) <= {"new", "same", "exit"}
+    assert (ev["day0"] >= pd.to_datetime(ev["end"])).all()                   # dated by announcement, after quarter end
+    caps = lab.capabilities(d)
+    assert "smart_money" in caps["types"]
+    spec = {"type": "smart_money", "market": "cn", "hold_days": 20, "entry_lag": 1,
+            "filters": [{"field": "category", "op": "==", "value": "national"}, {"field": "action", "op": "==", "value": "new"}]}
+    r = lab.explore(d, spec, "zh", log=lambda *a: None)
+    assert r["trades"] > 50 and "十大流通股东公布后" in r["description"]
+    assert abs(r["ann_excess"]) < 0.05                                       # no planted effect -> no edge found

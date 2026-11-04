@@ -46,7 +46,7 @@ HOLDOUT_YEARS = 2
 STRESS_MULT = 2.0          # cost stress test: every cost doubled
 WF_WARMUP = 2              # walk-forward: years of history before the first out-of-sample year
 WF_MAX_VARIANTS = 12
-TYPES = ("earnings", "forecast", "policy", "factor")
+TYPES = ("earnings", "forecast", "smart_money", "policy", "factor")
 OPS = {">=": lambda s, v: s >= v, "<=": lambda s, v: s <= v, ">": lambda s, v: s > v, "<": lambda s, v: s < v,
        "==": lambda s, v: s == v, "!=": lambda s, v: s != v,
        "in": lambda s, v: s.isin(v if isinstance(v, list) else [v]),
@@ -73,6 +73,17 @@ FIELDS = {
         "change_pct": "forecast profit change vs last year, % (mid-point)",
         "industry": "Eastmoney industry name",
         "quarter": "period the forecast is for: 1, 2, 3 or 4",
+    },
+    "smart_money": {
+        "category": "national (汇金/证金/国新/诚通…), social (社保/养老金), northbound (香港中央结算), insurance, qfii, fund",
+        "action": "new, add, reduce, same, or exit (left the top-10 tradable holders since last quarter)",
+        "confidence": "disclosed, inferred (exit: must have sold) or possible (exit: sold or pushed out)",
+        "value_yi": "value of the position at quarter end, 亿 yuan",
+        "value_change_yi": "estimated value bought (+) / sold (−) in the quarter, 亿 yuan",
+        "change_pct": "change in shares held, %",
+        "holders": "how many entities of that kind hold the stock",
+        "industry": "Eastmoney industry name",
+        "quarter": "quarter of the report: 1, 2, 3 or 4",
     },
     "policy": {
         "industry": "Shenwan level-1 industry, e.g. 电子, 计算机, 电力设备, 医药生物",
@@ -263,7 +274,9 @@ def forecast_events(data_dir: str, since: str = "2016-01-01", log=print, downloa
 FIELD_ZH = {"sue": "业绩惊喜SUE", "reaction": "公布两天涨跌", "pre": "公布前5天涨跌", "tone": "AI读财报语气",
             "guidance": "业绩指引", "rev_yoy": "营收增长%", "np_yoy": "利润增长%", "roe": "年化ROE%", "gm": "毛利率%",
             "industry": "行业", "quarter": "季度", "type": "预告类型", "change_pct": "预告变动%", "stance": "态度",
-            "strength": "措辞强度", "kind": "类别", "escalation": "措辞升级"}
+            "strength": "措辞强度", "kind": "类别", "escalation": "措辞升级", "category": "资金类型",
+            "action": "动作", "confidence": "可信度", "value_yi": "持仓市值(亿)", "value_change_yi": "估算买卖金额(亿)",
+            "holders": "持有主体数"}
 OP_ZH = {"contains": "包含", "in": "属于", "not_in": "不属于", "between": "介于"}
 
 
@@ -279,6 +292,7 @@ def describe_spec(spec: dict, lang: str = "zh") -> str:
         conds.append(f"{field} {op} {v}")
     what = {"earnings": "财报发布后" if zh else "after quarterly reports",
             "forecast": "业绩预告发布后" if zh else "after profit pre-announcements (业绩预告)",
+            "smart_money": "十大流通股东公布后（聪明钱持仓变化）" if zh else "after top-10 holder disclosures (smart money)",
             "policy": "新闻联播政策信号后买入申万行业指数" if zh else "after 新闻联播 policy signals, buy the Shenwan industry index",
             "factor": "定期调仓买入因子得分最高的股票" if zh else "rebalance into the top stocks by factors"}.get(t, t)
     parts = [what]
@@ -476,7 +490,7 @@ def run_spec(data_dir: str, spec: dict, phase: str = "explore", log=print, cost_
     start, end = (None, h0) if phase == "explore" else (h0, None)
     t = spec["type"]
     universe = ""
-    if t in ("earnings", "forecast"):
+    if t in ("earnings", "forecast", "smart_money"):
         market = spec["market"]
         prices = stock_prices(data_dir, market)
         if prices is None:
@@ -485,6 +499,11 @@ def run_spec(data_dir: str, spec: dict, phase: str = "explore", log=print, cost_
             ev = earnings_events(data_dir, market)
             if ev is None:
                 raise SpecError(f"no earnings events for {market}: run `stockproof research --market {market}` once")
+        elif t == "smart_money":
+            from stockproof import flows
+            ev = _memo("smart_money", flows.flows_dir(data_dir), lambda: flows.events(data_dir, log=log))
+            if not len(ev):
+                raise SpecError("no holder history: run `stockproof moneymap --history 2016` once (about 1.5 hours)")
         else:
             ev = _memo("forecast", os.path.join(data_dir, "cn"), lambda: forecast_events(data_dir, log=log))
             if not len(ev):
@@ -725,13 +744,15 @@ def walk_forward(data_dir: str, spec: dict, lang: str = "zh", base: dict | None 
         text = (f"滚动向前验证（{how}）：{len(rows)} 个样本外年份平均每年 {100 * oos:+.1f}%，{pos}/{len(rows)} 年为正")
         text += (f"；事后看最好的版本同期平均 {100 * ins:+.1f}%。" if k > 1 else "。")
         if code == "fades":
-            text += "优势没能延续到下一年，样本内的好结果很可能是挑出来的。"
+            text += ("优势没能延续到下一年，样本内的好结果很可能是挑出来的。" if ins > 0 else
+                     "试过的版本里没有一个能持续跑赢市场。")
     else:
         text = (f"Walk-forward ({how}): {len(rows)} out-of-sample years average {100 * oos:+.1f}%/yr, "
                 f"{pos}/{len(rows)} positive")
         text += (f"; the hindsight-best variant averaged {100 * ins:+.1f}% over the same years." if k > 1 else ".")
         if code == "fades":
-            text += " The edge did not carry into the next year; the in-sample result was likely picked, not real."
+            text += (" The edge did not carry into the next year; the in-sample result was likely picked, not real."
+                     if ins > 0 else " None of the variants tried beat the market consistently.")
     out.update(code=code, mean=oos, positive=pos, in_sample_best=ins, gap=ins - oos, text=text)
     return out
 
@@ -895,6 +916,11 @@ def capabilities(data_dir: str) -> dict:
         out["types"]["forecast"] = {"fields": FIELDS["forecast"], "note": "业绩预告 tables download on first use (~1 min)"}
         if fundamentals(data_dir) is not None:
             out["types"]["factor"] = {"factors": list(FACTORS), "note": "top-N rebalanced after each report deadline"}
+    from stockproof import flows
+    nq = len([f for f in os.listdir(flows.flows_dir(data_dir)) if f.startswith("holders_")])
+    if nq >= 8 and stock_prices(data_dir, "cn") is not None:
+        out["types"]["smart_money"] = {"fields": FIELDS["smart_money"], "quarters": nq,
+                                       "note": "events dated by each company's announcement; CSI 300 members only"}
     from stockproof import policy
     if policy.load_prices(data_dir) is not None:
         out["types"]["policy"] = {"fields": FIELDS["policy"]}

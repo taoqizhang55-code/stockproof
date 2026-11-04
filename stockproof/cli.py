@@ -481,6 +481,74 @@ def cmd_mcp(args) -> int:
     return mcp_server.main(data_dir, args.provider, args.model, args.base_url, args.auto_dashboard)
 
 
+def cmd_moneymap(args) -> int:
+    """Smart-money map for one quarter, or one stock's big holders."""
+    from stockproof import flows
+    zh = args.lang == "zh"
+    if args.etf:
+        from stockproof import etf_flows
+        print("重点宽基 ETF 每日净申购（第一次要下载约 4 个月的份额，几分钟）……" if zh else "Key broad ETFs, daily net creations ...")
+        r = etf_flows.summary(args.data_dir, 60, args.lang)
+        if r.get("error"):
+            print(r["error"])
+            return 1
+        yi = lambda v: f"{v / 1e8:+.1f}亿" if zh else f"{v / 1e9:+.2f}B"
+        print(f"  {r['from']} – {r['to']}: {'净申购' if zh else 'net creation'} {yi(r['net_creation'])}, "
+              f"{'其中大盘下跌日' if zh else 'on down days'} {yi(r['down_day_creation'])}")
+        for d in r["flagged_days"]:
+            print(f"  ! {d['date']}  {yi(d['net_creation'])}  CSI300 {100 * (d['csi300'] or 0):+.2f}%  z={d['z']}")
+        if not r["flagged_days"]:
+            print("  " + ("这段时间没有疑似托底日。" if zh else "No flagged days in this period."))
+        print("  " + r["rule"])
+        print("  " + r["caveat"])
+        return 0
+    if args.test:
+        r = flows.history_tests(args.data_dir, refresh=True)
+        if not r:
+            print("需要先下载历史季度：stockproof moneymap --history 2016" if zh else "Run `stockproof moneymap --history 2016` first")
+            return 1
+        print(("公告后跟着买、持有 {h} 个交易日，{d} 之前，已扣成本：" if zh else "Buy after disclosure, hold {h} days, before {d}, after costs:")
+              .format(h=r["hold_days"], d=r["holdout_start"]))
+        for cat, res in r["results"].items():
+            for act, x in res.items():
+                t = "—" if x["t"] is None else f"{x['t']:.1f}"
+                print(f"  {flows.LABEL[cat][0 if zh else 1]:<14} {act:<4} {x['events']:>5}  "
+                      f"{100 * (x['ann'] or 0):+5.1f}%/yr  t={t}  2x {100 * (x['ann_2x'] or 0):+5.1f}%")
+        return 0
+    if args.history:
+        print(("下载历史季度的十大流通股东（每季度约 2 分钟，可随时中断、重跑会接着下）……" if zh else
+               "Downloading past quarters of top-10 holders (~2 min each; stop any time, rerun resumes) ..."))
+        r = flows.download_history(args.data_dir, args.history)
+        print(f"  done: {len(r['downloaded'])} downloaded, {len(r['failed'])} failed {r['failed'] or ''}")
+        return 0 if not r["failed"] else 1
+    if args.ticker:
+        r = flows.stock_holders(args.data_dir, args.ticker, quarters=1, lang=args.lang)
+        if r.get("error"):
+            print(r["error"])
+            return 1
+        print(r["summary"])
+        return 0
+    r = flows.money_map(args.data_dir, args.category, args.quarter, lang=args.lang)
+    if r.get("error"):
+        print(r["error"])
+        return 1
+    c = r.get("counts", {})
+    yi = lambda v: f"{v / 1e8:+.1f}亿" if zh else f"{v / 1e8:+.1f}00M"
+    print(f"{r.get('label', args.category)} · {r['quarter']} · {r.get('stocks', 0)} {'只股票' if zh else 'stocks'} · "
+          f"{'新进' if zh else 'new'} {c.get('new', 0)} / {'增持' if zh else 'added'} {c.get('add', 0)} / "
+          f"{'减持' if zh else 'reduced'} {c.get('reduce', 0)} · {'估算净变化' if zh else 'est. net change'} "
+          f"{yi(r.get('net_value_change', 0))}")
+    print("  " + ("按行业：" if zh else "By industry: ") + "，".join(
+        f"{i['industry']} {yi(i['value_change'])}" for i in r.get("industries", [])[:8]))
+    for key, title in (("new", "新进" if zh else "New"), ("added", "增持最多" if zh else "Added most"),
+                       ("reduced", "减持最多" if zh else "Reduced most")):
+        rows = r.get(key) or []
+        if rows:
+            print(f"  {title}: " + "，".join(f"{x['name']}({yi(x['value_change'])})" for x in rows[:8]))
+    print("  " + r.get("limits", ""))
+    return 0
+
+
 def cmd_breakouts(args) -> int:
     """Whole-market A-share scan for today's zone breakouts / breakdowns."""
     from stockproof import market_scan
@@ -1011,6 +1079,17 @@ def build_parser() -> argparse.ArgumentParser:
     mcpp.add_argument("--data-dir", default=DATA_DIR)
     mcpp.set_defaults(func=cmd_mcp)
 
+    mm = sub.add_parser("moneymap", help="smart-money map: what the national team / pensions / QFII ... did this quarter")
+    mm.add_argument("--category", default="national", choices=["national", "social", "northbound", "insurance", "qfii", "fund"])
+    mm.add_argument("--quarter", help="quarter end YYYYMMDD (default: latest fully reported)")
+    mm.add_argument("--ticker", help="instead: the big holders of one A-share")
+    mm.add_argument("--test", action="store_true", help="instead: history test of buying after each kind's disclosed moves")
+    mm.add_argument("--etf", action="store_true", help="instead: the national team's ETF channel (daily net creations)")
+    mm.add_argument("--history", metavar="YEAR", help="download every quarter since YEAR (for history tests)")
+    mm.add_argument("--lang", default="zh", choices=["en", "zh"])
+    mm.add_argument("--data-dir", default=DATA_DIR)
+    mm.set_defaults(func=cmd_moneymap)
+
     brk = sub.add_parser("breakouts", help="whole-market A-share scan: today's support/resistance breakouts")
     brk.add_argument("--direction", default="both", choices=["up", "down", "both"])
     brk.add_argument("--top", type=int, default=60, help="how many of the most traded movers to chart (default 60)")
@@ -1097,6 +1176,7 @@ MENU = {
                     ("schedule --time 21:00", "每晚自动更新（Mac / Windows / Linux）")]),
         ("选股与评分卡", [("screen", "全市场 A 股选股名单和理由"),
                       ("breakouts", "全市场扫描：今天放量突破阻力 / 跌破支撑的股票"),
+                      ("moneymap --category national", "资金地图：国家队/社保/北向/险资这个季度买卖了什么"),
                       ("scorecard 600519", "证据评分卡：每个维度附出处和检验记录")]),
         ("研究与量化实验室", [("research --market cn", "财报事件研究和扣费回测"),
                         ("policy", "新闻联播政策信号研究"),
@@ -1116,6 +1196,7 @@ MENU = {
                             ("schedule --time 21:00", "run daily every evening (macOS / Windows / Linux)")]),
         ("Screen and scorecards", [("screen", "whole-market A-share shortlist with reasons"),
                                    ("breakouts", "whole-market scan: today's breakouts / breakdowns"),
+                                   ("moneymap --category national", "smart-money map for the quarter"),
                                    ("scorecard 600519", "evidence scorecard with sources and track record")]),
         ("Research and the quant lab", [("research --market cn", "earnings event study and backtest"),
                                         ("policy", "新闻联播 policy-signal study"),

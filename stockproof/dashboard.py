@@ -466,7 +466,7 @@ class Dashboard:
             if self.job["running"]:
                 return False, "busy"
             tickers = list(self.settings["watchlist"])
-            if kind == "screen":
+            if kind in ("screen", "moneymap", "etf"):
                 tickers = [kind]                      # whole market, independent of the watchlist
             elif not tickers:
                 return False, "empty"
@@ -484,6 +484,23 @@ class Dashboard:
                 with self.lock:
                     self.job["current"] = kind
                 self._run_research(kind.split("_", 1)[1], lang)
+                with self.lock:
+                    self.job["done"] = 1
+                return
+            if kind == "etf":
+                from stockproof import etf_flows
+                with self.lock:
+                    self.job["current"] = kind
+                etf_flows.daily(self.data_dir, 60, fetch=True, log=self._log)
+                with self.lock:
+                    self.job["done"] = 1
+                return
+            if kind == "moneymap":
+                from stockproof import flows
+                with self.lock:
+                    self.job["current"] = kind
+                df = flows.holders(self.data_dir, None, fetch=True, log=self._log)
+                self._log(f"money map: {len(df)} holder rows for {flows.latest_quarter()}")
                 with self.lock:
                     self.job["done"] = 1
                 return
@@ -649,6 +666,46 @@ def make_handler(app: Dashboard, port: int):
                         return self._send(404, {"error": "not found"})
                     with open(p, encoding="utf-8") as f:
                         return self._send(200, f.read(), "text/html; charset=utf-8")
+                if url.path == "/api/moneymap":
+                    from stockproof import flows
+                    lang = self._lang(qs)
+                    cat = (qs.get("category") or ["national"])[0]
+                    if cat not in flows.LABEL:
+                        return self._send(400, {"error": "unknown category"})
+                    q = flows.latest_quarter()
+                    p = os.path.join(flows.flows_dir(app.data_dir), f"holders_{q}.csv")
+                    if not os.path.exists(p):
+                        return self._send(200, {"need_download": True, "quarter": q})
+                    res = flows.money_map(app.data_dir, cat, q, lang=lang, fetch=False, log=lambda *a: None)
+                    ht_path = os.path.join(flows.flows_dir(app.data_dir), "history_tests.json")
+                    if os.path.exists(ht_path):
+                        try:
+                            with open(ht_path, encoding="utf-8") as f:
+                                ht = json.load(f)
+                            res["history_test"] = {**{k: ht[k] for k in ("hold_days", "holdout_start", "quarters")},
+                                                   **(ht["results"].get(cat) or {})}
+                        except (OSError, ValueError, KeyError):
+                            pass
+                    res["categories"] = {k: v[0 if lang == "zh" else 1] for k, v in flows.LABEL.items()}
+                    return self._send(200, res)
+                if url.path == "/api/etfflows":
+                    from stockproof import etf_flows
+                    r = etf_flows.summary(app.data_dir, 60, self._lang(qs), fetch=False, log=lambda *a: None)
+                    if r.get("error"):
+                        return self._send(200, {"need_download": True})
+                    stale = (dt.date.today() - dt.date.fromisoformat(r["to"])).days > 4
+                    return self._send(200, _clean({**r, "stale": stale}))
+                if url.path == "/api/smartmoney":
+                    from stockproof import flows
+                    tk = (qs.get("ticker") or [""])[0].upper()
+                    lang = self._lang(qs)
+                    res = flows.stock_holders(app.data_dir, tk, quarters=1, lang=lang, fetch=False)
+                    if not res.get("error"):
+                        res["dragon_tiger"] = flows.dragon_tiger(app.data_dir, tk, days=30, fetch=not app.demo)[:8]
+                        res["main_force"] = None if app.demo else flows.main_force(app.data_dir, tk, days=20)
+                        nm = app.name_of(tk)
+                        res["name"] = res.get("stock_name") or nm if nm == tk else nm
+                    return self._send(200, _clean(res))
                 if url.path == "/api/breakouts":
                     from stockproof import market_scan
                     return self._send(200, market_scan.latest(app.data_dir) or {})
@@ -803,7 +860,7 @@ def make_handler(app: Dashboard, port: int):
                     return self._send(200, {"error": f"{type(e).__name__}: {str(e)[:160]}"})
             if path == "/api/refresh":
                 kind = body.get("kind")
-                if kind not in ("news", "earnings", "research_us", "research_cn", "screen"):
+                if kind not in ("news", "earnings", "research_us", "research_cn", "screen", "moneymap", "etf"):
                     return self._send(400, {"error": "unknown refresh kind"})
                 ok, msg = app.start_refresh(kind)
                 return self._send(200 if ok else 409, {"ok": ok, "message": msg})
