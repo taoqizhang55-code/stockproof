@@ -703,7 +703,7 @@ async function ppAct(body) {
   return r;
 }
 async function loadPxAlerts(check) {
-  let r; try { r = check ? await api("/api/alerts", {}) : await api("/api/alerts"); } catch (e) { r = {recent: [], error: e.message}; }
+  let r; try { r = check ? await api("/api/pxalerts", {}) : await api("/api/pxalerts"); } catch (e) { r = {recent: [], error: e.message}; }
   $("#al-meta").textContent = r.error ? r.error : (check ? tr("d_al_meta", {n: (r.new || []).length, w: (r.watching || []).length}) + " " + (r.note || "") : tr("d_al_cli"));
   const R = r.recent || [];
   $("#al-list").innerHTML = R.length ? `<ul class="pts">${R.map((a) => `<li><span class="note">${esc(a.created_at.slice(5, 16).replace("T", " "))}</span> ${esc(a.text)}</li>`).join("")}</ul>` : `<p class="empty">${esc(tr("d_al_none"))}</p>`;

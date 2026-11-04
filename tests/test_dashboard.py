@@ -96,7 +96,7 @@ class DashboardServer(unittest.TestCase):
         self.assertEqual(d["detail"]["pending"], 1)
         self.assertTrue(any(a["id"] == aid for a in d["accounts"]))
         self.assertEqual(self.post("/api/paper", {"action": "nope"})[1]["error"], "unknown action")
-        self.assertIn("recent", self.get("/api/alerts"))
+        self.assertIn("recent", self.get("/api/pxalerts"))
 
     def test_page_and_state(self):
         with urllib.request.urlopen(f"http://127.0.0.1:{self.port}/") as r:

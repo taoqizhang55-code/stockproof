@@ -793,7 +793,7 @@ def make_handler(app: Dashboard, port: int):
                     return self._send(200, json.loads(row[0]) if row else {"error": "not found"})
                 if url.path == "/api/paper":
                     return self._send(200, app.paper_overview((qs.get("id") or [None])[0]))
-                if url.path == "/api/alerts":
+                if url.path == "/api/pxalerts":
                     from stockproof import alerts
                     return self._send(200, _clean({"recent": alerts.recent(app._store(), 50)}))
                 if url.path == "/api/team/record":
@@ -947,7 +947,7 @@ def make_handler(app: Dashboard, port: int):
                     return self._send(200, app.paper_action(body))
                 except Exception as e:
                     return self._send(200, {"error": f"{type(e).__name__}: {str(e)[:160]}"})
-            if path == "/api/alerts":
+            if path == "/api/pxalerts":
                 try:
                     return self._send(200, app.alerts_check(app.settings["lang"]))
                 except Exception as e:
