@@ -18,7 +18,9 @@ Command line interface.
 from __future__ import annotations
 
 import argparse
+import json
 import os
+import re
 import datetime as dt
 import sys
 import webbrowser
@@ -531,11 +533,160 @@ def cmd_team(args) -> int:
     if f.get("cap_note"):
         print("  " + f["cap_note"])
     print(f"  log id {r['call_id']} · " + r["disclaimer"])
+    print(("  分享卡片：stockproof card team " if args.lang == "zh" else "  Share card: stockproof card team ") + r["call_id"]
+          + ("    模拟单：stockproof paper from-team <账户> --call " if args.lang == "zh" else "    Paper order: stockproof paper from-team <account> --call ")
+          + r["call_id"])
     return 0
 
 
 def _pct(x):
     return "—" if x is None else f"{100 * x:+.2f}%"
+
+
+def cmd_ask(args) -> int:
+    """One sentence in, the right feature out."""
+    from stockproof import ask
+    from stockproof.dashboard import Dashboard
+    zh = args.lang == "zh"
+    text = " ".join(args.text).strip()
+    if not text:
+        print('例：stockproof ask "茅台能买吗"' if zh else 'e.g. stockproof ask "should I buy NVDA"')
+        return 1
+    app = Dashboard(args.data_dir, args.provider, args.model, args.base_url)
+    client = None
+    try:
+        from stockproof.llm import LLMClient
+        client = LLMClient.from_provider(args.provider, args.model, args.base_url)
+    except Exception:
+        pass
+    r = ask.route(app, text, client)
+    argv = ask.cli_argv(r)
+    how = {"rules": "关键词" if zh else "keywords", "llm": "AI 判断" if zh else "AI", "default": "默认" if zh else "default"}[r["how"]]
+    print(("→ 理解为：" if zh else "→ Understood as: ") + (r["label"] if zh else r["label_en"])
+          + (f" · {r['ticker']}" if r["ticker"] else "") + f"（{how}）")
+    if argv:
+        print(("  等价命令：stockproof " if zh else "  Same as: stockproof ") + " ".join(
+            a if re.fullmatch(r"[\w.\-]+", a) else f'"{a}"' for a in argv))
+    print()
+    common = ["--data-dir", args.data_dir]
+    lang_cmds = {"team", "paper", "alerts", "moneymap", "screen", "scorecard", "lab"}
+    if argv:
+        extra = common + (["--lang", args.lang] if argv[0] in lang_cmds else [])
+        if argv[0] in ("team", "scorecard"):
+            extra += ["--provider", args.provider] + (["--model", args.model] if args.model else [])
+        try:
+            main(argv + extra)
+        except SystemExit as e:
+            return int(e.code or 0)
+        return 0
+    from stockproof import mcp_server
+    tools = mcp_server.Tools(args.data_dir, args.provider, args.model, args.base_url)
+    i, tk, a = r["intent"], r["ticker"], r["args"]
+    if i == "paper_order":
+        from stockproof import paper
+        from stockproof.store import Store
+        st = Store(args.data_dir)
+        acc = [x for x in paper.accounts(st) if x["kind"] == "manual"]
+        name = acc[-1]["name"] if acc else ("我的模拟盘" if zh else "my paper")
+        if not acc:
+            paper.create_account(st, name)
+        sub = ["paper", a["side"], name, tk] + (["--shares", str(a["shares"])] if a.get("shares") else
+                                               ["--value", str(int(a.get("value", 100_000)))] if a["side"] == "buy" else [])
+        try:
+            main(sub + common + ["--lang", args.lang])
+        except SystemExit as e:
+            return int(e.code or 0)
+        return 0
+    if i == "portfolio":
+        if not a.get("holdings"):
+            print('把持仓写进句子里，例如：stockproof ask "体检持仓 600519 100股 00700 300股"' if zh else
+                  'Put the holdings in the sentence, e.g. "check my portfolio: AAPL 50, MSFT 20"')
+            return 1
+        try:
+            main(["portfolio", ", ".join(f"{h['ticker']} {h['shares']}" for h in a["holdings"]), "--data-dir", args.data_dir])
+        except SystemExit as e:
+            return int(e.code or 0)
+        return 0
+    if i in ("why", "compare") and tk not in app.settings["watchlist"]:
+        print(("先更新这只股票的新闻和公告（约 1 分钟）……" if zh else "Fetching this stock's news and filings first (~1 min) ..."))
+        tools.refresh_stock(tk, args.lang)
+    if i == "why":
+        out = tools.why_did_it_move(tk, None, args.lang)
+        mv = out.get("move") or {}
+        if out.get("error"):
+            print(out["error"])
+            return 1
+        print(f"{out.get('ticker')} {out.get('day')}  {100 * (mv.get('ret') or 0):+.1f}%")
+        print(out.get("summary") or ("没有找到能解释这次涨跌的消息。" if zh else "Nothing found that explains the move."))
+        for c in out.get("causes", []):
+            print(f"  - {c['text']} {''.join(f'[{x}]' for x in c['evidence'])}")
+        for n, e in enumerate(out.get("evidence", [])[:8], 1):
+            print(f"  [{n}] {e.get('title', '')[:70]} {e.get('url') or ''}")
+        return 0
+    if i == "technical":
+        out = tools.technical_analysis(tk, False, args.lang)
+        if out.get("error"):
+            print(out["error"])
+            return 1
+        from stockproof import quotes, ta
+        print(ta.text_chart(quotes.load_bars(args.data_dir, tk), out.get("zones"), lang=args.lang))
+        ns, nr = out.get("nearest_support"), out.get("nearest_resistance")
+        print(f"{tk} {out['date']} {'收盘' if zh else 'close'} {out['close']} · {out['trend'].get('text', '') if isinstance(out['trend'], dict) else out['trend']}")
+        if ns:
+            print(f"  {'支撑' if zh else 'support'} {ns['low']:.2f}–{ns['high']:.2f}")
+        if nr:
+            print(f"  {'阻力' if zh else 'resistance'} {nr['low']:.2f}–{nr['high']:.2f}")
+        for sg in out.get("signals", []):
+            print(f"  · {sg.get('day', '')} {sg['rule']}")
+        print("  " + out["note"])
+        return 0
+    if i == "compare":
+        out = tools.compare_with_last_report(tk, args.lang)
+        print(json.dumps(out, ensure_ascii=False, indent=1)[:3000])
+        return 0
+    if i == "digest":
+        out = tools.daily_digest(False, args.lang)
+        print(out.get("text") or out.get("markdown") or json.dumps(out, ensure_ascii=False)[:2000])
+        return 0
+    print(menu_text(args.lang))
+    return 0
+
+
+def cmd_card(args) -> int:
+    """Write a shareable result card (SVG; on macOS also a PNG)."""
+    import platform
+    import subprocess
+    from stockproof import card, paper
+    from stockproof.store import Store
+    st = Store(args.data_dir)
+    ref = args.id
+    if args.kind == "paper":
+        a = paper.find_account(st, args.id)
+        if not a:
+            raise SystemExit("no such paper account")
+        ref = a["id"]
+    svg = card.render(args.kind, ref, st, args.data_dir, args.lang)
+    if svg is None:
+        raise SystemExit("not found: " + args.id)
+    out_dir = os.path.join(args.data_dir, "cards")
+    os.makedirs(out_dir, exist_ok=True)
+    path = args.output or os.path.join(out_dir, f"{args.kind}-{ref}.svg")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(svg)
+    print(path)
+    if platform.system() == "Darwin" and path.endswith(".svg"):          # Quick Look renders SVG to PNG
+        try:
+            subprocess.run(["qlmanage", "-t", "-s", "2400", "-o", os.path.dirname(path) or ".", path],
+                           capture_output=True, timeout=30)
+            png = path + ".png"
+            if os.path.exists(png):
+                os.replace(png, path[:-4] + ".png")
+                print(path[:-4] + ".png")
+        except Exception:
+            pass
+    if args.open:
+        webbrowser.open(Path(path).absolute().as_uri())
+    return 0
 
 
 def cmd_paper(args) -> int:
@@ -1274,6 +1425,24 @@ def build_parser() -> argparse.ArgumentParser:
     tm.add_argument("--base-url")
     tm.set_defaults(func=cmd_team)
 
+    ak = sub.add_parser("ask", help='one sentence, the right feature: stockproof ask "茅台能买吗"')
+    ak.add_argument("text", nargs="+")
+    ak.add_argument("--lang", default="zh", choices=["en", "zh"])
+    ak.add_argument("--data-dir", default=DATA_DIR)
+    ak.add_argument("--provider", default="deepseek", choices=sorted(PROVIDERS))
+    ak.add_argument("--model")
+    ak.add_argument("--base-url")
+    ak.set_defaults(func=cmd_ask)
+
+    cd = sub.add_parser("card", help="shareable result card: team <call_id> | paper <account> | lab <experiment id>")
+    cd.add_argument("kind", choices=["team", "paper", "lab"])
+    cd.add_argument("id")
+    cd.add_argument("-o", "--output")
+    cd.add_argument("--open", action="store_true")
+    cd.add_argument("--lang", default="zh", choices=["en", "zh"])
+    cd.add_argument("--data-dir", default=DATA_DIR)
+    cd.set_defaults(func=cmd_card)
+
     pp = sub.add_parser("paper", help="paper trading: pessimistic fills, append-only record, NAV vs the market (no real orders)")
     pp.add_argument("action", nargs="?", default="list",
                     choices=["list", "new", "strategy", "buy", "sell", "run", "show", "gap", "from-team"])
@@ -1396,6 +1565,8 @@ MENU = {
                     ("daily", "更新关注列表并生成每日简报"),
                     ("calendar", "未来两周谁发财报"),
                     ("schedule --time 21:00", "每晚自动更新（Mac / Windows / Linux）")]),
+        ("一句话与分享卡片", [('ask "茅台能买吗"', "一句话直接问：自动找到对应的功能（投研团队、为什么涨跌、资金地图、模拟盘……）"),
+                        ("card team <记录编号>", "分享卡片：投研团队判断 / 模拟盘（card paper 账户名）/ 实验结果（card lab 实验编号）")]),
         ("选股与评分卡", [("screen", "全市场 A 股选股名单和理由"),
                       ("breakouts", "全市场扫描：今天放量突破阻力 / 跌破支撑的股票"),
                       ("moneymap --category national", "资金地图：国家队/社保/北向/险资这个季度买卖了什么"),
@@ -1414,6 +1585,8 @@ MENU = {
         ("AI 智能体", [("mcp --install-dsh", "装进 DeepSeek Harness，用中文直接问；输入 /stockproof 可选现成的问题")]),
     ],
     "en": [
+        ("One sentence & cards", [('ask "should I buy NVDA"', "ask in one sentence; it picks the feature (team, why it moved, smart money, paper ...)"),
+                                  ("card team <call id>", "share card: a team call / paper account (card paper NAME) / lab result (card lab ID)")]),
         ("Start here", [("demo", "offline demo on bundled real data, no API key"),
                         ("dashboard", "the local web page with everything (the home tab has clickable examples)")]),
         ("Daily watching", [("scan AAPL 600519", "news mood: relevance and sentiment"),

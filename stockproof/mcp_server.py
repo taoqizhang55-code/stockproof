@@ -43,6 +43,8 @@ How to use it well:
 - "分析一下 X" / "X 能买吗" / "give me a view on X" -> research_team; pass what the user wants discussed as `question`
   in their words (e.g. "重点看扣非亏损会不会持续") (a cited multi-analyst view, logged and
   scored later; never present it as advice or an order). "How accurate is the team?" -> team_track_record.
+- Not sure which tool fits a sentence -> ask(text) returns the tool and arguments to call. "做成卡片 / 分享 /
+  share this" -> share_card(kind, id) for a team call_id, a paper account or a lab experiment id.
 - 模拟盘 / paper trading -> paper_trading(action=...): list, show, new, buy, sell, run, gap, strategy (a lab
   experiment id), from_team (a team call id). Orders fill at the NEXT trading day's open under pessimistic rules
   (limit-up/down, 5% of volume, impact, T+1); records are append-only. Never claim a paper order was a real one, and
@@ -492,6 +494,61 @@ class Tools:
                             + (" 持续盯盘：在终端运行 stockproof alerts --watch。" if lang == "zh" else
                                " For continuous watching run `stockproof alerts --watch`.")})
 
+    TOOL_FOR = {"team": "research_team", "team_record": "team_track_record", "why": "why_did_it_move",
+                "technical": "technical_analysis", "smart_money": "smart_money", "moneymap": "money_map",
+                "etf": "national_team_etf", "margin": "market_leverage", "breakouts": "scan_market",
+                "compare": "compare_with_last_report", "calendar": "earnings_calendar", "digest": "daily_digest",
+                "portfolio": "portfolio_checkup", "screen": "screen_stocks", "scorecard": "evidence_scorecard",
+                "lab": "lab_capabilities", "paper_order": "paper_trading", "paper": "paper_trading",
+                "alerts": "price_alerts", "menu": "stockproof_menu"}
+
+    def ask(self, text: str, lang: str | None = None) -> dict:
+        from stockproof import ask
+        client, _ = self._client()
+        r = ask.route(self.app, text, client)
+        a, tk = r["args"], r["ticker"]
+        args = {"team": {"ticker": tk, "question": a.get("question")}, "why": {"ticker": tk}, "technical": {"ticker": tk, "open_chart": False},
+                "smart_money": {"ticker": tk}, "moneymap": {"category": a.get("category", "national")},
+                "compare": {"ticker": tk}, "scorecard": {"ticker": tk},
+                "portfolio": {"holdings": a.get("holdings", [])}, "breakouts": {"direction": a.get("direction", "both")},
+                "paper_order": {"action": a.get("side", "buy"), "ticker": tk, "value": a.get("value"), "shares": a.get("shares")},
+                "paper": {"action": "list"}}.get(r["intent"], {})
+        return self._clean({**r, "next_tool": self.TOOL_FOR.get(r["intent"]), "next_args": args,
+                            "howto": "Call next_tool with next_args now (for paper_order, the account defaults to the latest "
+                                     "manual paper account: call paper_trading(action='list') first if unsure). If the "
+                                     "intent looks wrong for what the user said, pick the right tool yourself."})
+
+    def share_card(self, kind: str, id: str, lang: str | None = None) -> dict:
+        from urllib.parse import quote
+        from stockproof import card
+        from stockproof.store import Store
+        lang = self._lang(lang)
+        if kind not in ("team", "paper", "lab"):
+            return {"error": "kind must be team (a research-team call_id), paper (an account id) or lab (an experiment id)"}
+        ref = id
+        if kind == "paper":
+            from stockproof import paper
+            a = paper.find_account(Store(self.app.data_dir), id)
+            if not a:
+                return {"error": "no such paper account"}
+            ref = a["id"]
+        svg = card.render(kind, ref, Store(self.app.data_dir), self.app.data_dir, lang)
+        if svg is None:
+            return {"error": "not found"}
+        os.makedirs(os.path.join(self.app.data_dir, "cards"), exist_ok=True)
+        path = os.path.join(self.app.data_dir, "cards", f"{kind}-{ref}.svg")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(svg)
+        out = {"file": path, "kind": kind, "id": ref}
+        if os.environ.get("STOCKPROOF_CHART_IMAGES", "1") != "0":
+            r = self.open_dashboard("home", port=8765, open_browser=False, _wait=20.0)
+            if not r.get("error"):
+                url = f"http://127.0.0.1:8765/card/{kind}/{quote(ref)}.svg?lang={lang}"
+                out.update(url=url, card_markdown=f"![stockproof card]({url})",
+                           howto="Put card_markdown on its own line (not in a code block). For a PNG, the dashboard's "
+                                 "'生成分享卡片' button downloads one.")
+        return out
+
     def team_track_record(self, lang: str | None = None) -> dict:
         from stockproof import team
         from stockproof.store import Store
@@ -509,6 +566,8 @@ class Tools:
                          "腾讯这期财报和上期比变了什么？", "下周谁发财报？", "今天的简报"]),
                       g("AI 投研团队", ["research_team", "team_track_record"],
                         ["让 AI 投研团队分析一下科大讯飞", "AI 团队过去的判断准不准？"]),
+                      g("一句话与分享卡片", ["ask", "share_card"],
+                        ["茅台能买吗？", "把刚才投研团队的结论做成分享卡片", "把我的模拟盘做成卡片"]),
                       g("模拟盘与提醒", ["paper_trading", "price_alerts"],
                         ["建一个模拟盘，用 10 万模拟买入贵州茅台", "我的模拟盘跑赢沪深300 了吗？", "我的股票有没有突破或到达计划价位？"]),
                       g("资金地图", ["money_map", "national_team_etf", "market_leverage", "smart_money"],
@@ -528,6 +587,8 @@ class Tools:
                          "What changed in Tencent's latest report?", "Who reports next week?"]),
                       g("AI research team", ["research_team", "team_track_record"],
                         ["Have the research team analyse NVDA", "How accurate has the team been?"]),
+                      g("One sentence & share cards", ["ask", "share_card"],
+                        ["Should I buy NVDA?", "Make a share card of the team's view", "Make a card of my paper account"]),
                       g("Paper trading & alerts", ["paper_trading", "price_alerts"],
                         ["Open a paper account and buy 10k of NVDA", "Is my paper account beating the index?", "Any alerts on my stocks?"]),
                       g("Smart money", ["money_map", "national_team_etf", "market_leverage", "smart_money"],
@@ -843,6 +904,10 @@ PROMPTS = [
     ("team", "AI 投研团队：分析一只股票", "Five AI analysts, a bull/bear debate and a PM's view, logged and scored later", "ticker",
      "用 research_team 让 AI 投研团队分析 {x}：先说结论（观点、置信度、观察期）、观察计划和风险，说明置信度为什么是这个水平，"
      "引用证据编号；说明这次判断已记入前瞻日志、到期会打分。不是买卖建议。"),
+    ("ask", "一句话问", "Ask anything in one sentence; stockproof picks the feature", "question",
+     "{x}\n（用 stockproof 回答：先用 ask 找到合适的工具和参数，再调用它；结论要带出处，不是投资建议。）"),
+    ("card", "生成分享卡片", "Make a shareable card of a team call, a paper account or a lab result", "what",
+     "用 share_card 把{x}做成分享卡片（投研团队的判断用 call_id，模拟盘用账户名，实验室用实验编号；不知道编号就先查最近的记录），把 card_markdown 单独一行展示出来。"),
     ("paper", "模拟盘：我的模拟账户", "Paper accounts vs the index, with holdings and orders", None,
      "用 paper_trading（action=list，再对每个账户 action=show）看我的模拟盘：总资产、收益、和沪深300/标普500 比的超额、最大回撤、持仓和最近的订单；"
      "如果有策略账户，用 action=gap 说明回测和模拟盘成交之间的差距。说明成交规则是悲观的，这是模拟盘不是实盘。"),
@@ -869,7 +934,8 @@ PROMPTS = [
      "用 portfolio_checkup 帮我体检持仓：{x}。用大白话解释集中度、同涨同跌、风险来源和历史大跌重演，不给买卖建议。"),
 ]
 ARG_ZH = {"ticker": "股票代码", "holdings": "持仓（代码 股数，比如 600519 100, AAPL 50；也可以发券商截图）",
-          "idea": "交易想法（用大白话写）", "conditions": "条件（可不写）"}
+          "idea": "交易想法（用大白话写）", "conditions": "条件（可不写）", "question": "一句话的问题（比如：茅台能买吗）",
+          "what": "要做成卡片的内容（比如：刚才的投研团队结论、我的模拟盘、某个实验）"}
 SKILL_MARK = ".stockproof-skill"
 
 
@@ -1119,6 +1185,21 @@ def build_server(tools: Tools):
         live prices (Sina, during the session) or the last close: support/resistance zone breaks, research-team plan
         levels reached, paper fills and cancellations. Each alert is recorded once. Alerts are not orders."""
         return tools.price_alerts(check, lang)
+
+    @srv.tool()
+    def ask(text: str, lang: str | None = None) -> dict:
+        """One-sentence entry: map what the user said (e.g. "茅台能买吗", "国家队最近买了什么", "模拟买入10万宁德时代")
+        to the right stockproof tool and its arguments (rules first, LLM only if no rule fits). Returns next_tool and
+        next_args; call that tool next. Use when unsure which tool fits."""
+        return tools.ask(text, lang)
+
+    @srv.tool()
+    def share_card(kind: str, id: str, lang: str | None = None) -> dict:
+        """Shareable result card (1200x675 image): kind=team with a research-team call_id, kind=paper with a paper
+        account id or name, kind=lab with a lab experiment id. Every card carries its checkable id, the rules
+        (fills / forward-log scoring / tries counted) and 'not advice'. Returns card_markdown (show it on its own
+        line) and the saved SVG file."""
+        return tools.share_card(kind, id, lang)
 
     @srv.tool()
     def team_track_record(lang: str | None = None) -> dict:

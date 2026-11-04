@@ -282,7 +282,7 @@ def state(store, data_dir: str, aid: str, fetch: bool = False) -> dict:
     nav = value / acct["cash"]
     bnav = bm / bm.dropna().iloc[0] if bm.notna().any() else pd.Series(np.nan, index=days)
     last = pos.iloc[-1] if tickers else pd.Series(dtype=float)
-    holdings = [{"ticker": t, "shares": int(last[t]), "price": float(closes[t].iloc[-1]) if pd.notna(closes[t].iloc[-1]) else None,
+    holdings = [{"ticker": t, "shares": int(last[t]), "price": round(float(closes[t].iloc[-1]), 3) if pd.notna(closes[t].iloc[-1]) else None,
                  "value": float(last[t] * closes[t].iloc[-1]) if pd.notna(closes[t].iloc[-1]) else None}
                 for t in tickers if last[t]]
     dd = float((nav / nav.cummax() - 1).min()) if len(nav) else 0.0

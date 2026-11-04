@@ -90,6 +90,8 @@ h3 { font-size:15px; margin:18px 0 6px; }
 .overall b { font-size:28px; font-variant-numeric:tabular-nums; }
 .reasons { font-size:13px; color:var(--muted); }
 .btn.sm { padding:4px 9px; font-size:13px; }
+.askbar { display:flex; gap:8px; margin:14px 0 0; }
+.askbar input { flex:1; min-width:0; font:inherit; font-size:16px; padding:11px 14px; border:1px solid var(--line); border-radius:12px; background:var(--card); color:var(--text); }
 .home { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:16px; margin-top:16px; }
 @media (max-width:860px) { .home { grid-template-columns:minmax(0, 1fr); } }
 .home .card { margin-top:0; display:flex; flex-direction:column; }
@@ -130,6 +132,8 @@ BODY = """
   <div class="langs"><button data-lang="en">EN</button><button data-lang="zh">中文</button></div>
 </header>
 <div class="meta"><span id="model"></span><span id="daily"></span><span id="tip"></span></div>
+<form id="ask-form" class="askbar" autocomplete="off"><input id="ask-input" maxlength="500"><button class="btn primary" id="ask-go" type="submit"></button></form>
+<div id="ask-out" class="note" style="margin:6px 0 0"></div>
 <nav class="tabs"><button data-tab="home" id="tab-home"></button><button data-tab="stocks" id="tab-stocks"></button><button data-tab="digest" id="tab-digest"></button><button data-tab="team" id="tab-team"></button><button data-tab="screen" id="tab-screen"></button><button data-tab="money" id="tab-money"></button><button data-tab="paper" id="tab-paper"></button><button data-tab="lab" id="tab-lab"></button><button data-tab="portfolio" id="tab-portfolio"></button><button data-tab="research" id="tab-research"></button></nav>
 <div id="view-home" hidden>
   <p class="note" id="home-intro" style="margin:12px 0 0"></p>
@@ -327,6 +331,7 @@ function applyText() {
   $("#tab-digest").textContent = tr("d_tab_digest");
   $("#tab-screen").textContent = tr("d_tab_screen");
   $("#tab-money").textContent = tr("d_tab_money");
+  $("#ask-input").placeholder = tr("d_ask_placeholder"); $("#ask-go").textContent = tr("d_ask_go");
   $("#tab-paper").textContent = tr("d_tab_paper"); $("#pp-h").textContent = tr("d_pp_h"); $("#pp-lead").textContent = tr("d_pp_lead");
   $("#pp-name").placeholder = tr("d_pp_name"); $("#pp-new").textContent = tr("d_pp_new"); $("#pp-run").textContent = tr("d_pp_run");
   $("#al-h").textContent = tr("d_al_h"); $("#al-check").textContent = tr("d_al_check");
@@ -613,7 +618,7 @@ function teamHTML(x) {
   const tr_ = (x.track_record || {}).summary;
   if (tr_) h += `<p class="note">${esc(tr("d_team_record", {n: tr_.calls, s: tr_.scored, h: tr_.hit_rate != null ? Math.round(100 * tr_.hit_rate) + "%" : "—"}))} ${esc(tr_.note || "")}
     <button class="btn sm" data-record="1">${esc(tr("d_rec_show"))}</button></p><div id="record-box"></div>`;
-  if (x.call_id && ["bullish", "bearish"].includes(f.stance)) h += `<p><button class="btn sm" data-paperteam="${esc(x.call_id)}">${esc(tr("d_pp_from_team"))}</button></p>`;
+  if (x.call_id) h += `<p>${["bullish", "bearish"].includes(f.stance) ? `<button class="btn sm" data-paperteam="${esc(x.call_id)}">${esc(tr("d_pp_from_team"))}</button> ` : ""}<button class="btn sm" data-share="team|${esc(x.call_id)}">${esc(tr("d_card_make"))}</button></p>`;
   return h + `<p class="note">${esc(x.disclaimer || "")}</p></div>`;
 }
 
@@ -693,7 +698,7 @@ async function loadPaper(id) {
   const g = PP.gap;
   if (g) h += `<div class="histbox"><h3>${esc(tr("d_pp_gap_h"))}</h3><p>${esc(tr("d_pp_gap", {n: g.round_trips, m: g.missed_entries}))}${g.avg_gap != null ? " · " + esc(tr("d_pp_gap_v", {a: pct1(g.avg_backtest_rule), b: pct1(g.avg_paper), c: pct1(g.avg_gap)})) : ""}</p>
     ${g.lab_backtest_ann_excess != null ? `<p class="note">${esc(tr("d_pp_gap_lab", {a: pct1(g.lab_backtest_ann_excess)}))}</p>` : ""}<p class="note">${esc(g.note)}</p></div>`;
-  $("#pp-detail").innerHTML = h + `<p class="note">${esc(d.rules)}</p>`;
+  $("#pp-detail").innerHTML = h + `<p class="note">${esc(d.rules)}</p><p><button class="btn sm" data-share="paper|${esc(ac.id)}">${esc(tr("d_card_make"))}</button></p>`;
 }
 async function ppAct(body) {
   const msg = $("#pp-msg");
@@ -726,6 +731,63 @@ document.addEventListener("click", async (e) => {
     pt.insertAdjacentHTML("afterend", ` <span class="note">${esc(r.error || tr("d_pp_team_ok", {a: (A.length ? A[A.length - 1].name : tr("d_pp_team_acct"))}))}</span>`);
     return;
   }
+});
+
+// ---------- one-sentence entry ----------
+async function askOne(text) {
+  text = (text || "").trim();
+  if (!text) return;
+  const out = $("#ask-out");
+  out.textContent = "…";
+  let r; try { r = await api("/api/ask", {text}); } catch (e) { out.textContent = e.message; return; }
+  const how = {rules: tr("d_ask_rules"), llm: tr("d_ask_llm"), default: tr("d_ask_default")}[r.how] || "";
+  out.innerHTML = `→ ${esc(tr("d_ask_as"))}<b>${esc(S.lang === "zh" ? r.label : r.label_en)}</b>${r.ticker ? " · " + esc(r.ticker) : ""} <span class="note">(${esc(how)})</span>` +
+    (r.argv ? ` · <code>stockproof ${esc(r.argv.map((a) => /^[\w.\-]+$/.test(a) ? a : '"' + a + '"').join(" "))}</code>` : "");
+  const tk = r.ticker, a = r.args || {};
+  const follow = async () => { if (tk && !S.watchlist.includes(tk)) S = await api("/api/watchlist", {tickers: [...S.watchlist, tk]}); };
+  const map = {
+    team: {act: "teamtext", arg: text}, team_record: {act: "teamtab"},
+    why: {act: "why", arg: tk}, technical: {act: "stock", arg: tk}, compare: {act: "stock", arg: tk}, scorecard: {act: "stock", arg: tk},
+    smart_money: {act: "holders", arg: tk}, moneymap: {act: "money", arg: a.category || "national"},
+    etf: {act: "money", arg: "national"}, margin: {act: "margin"}, breakouts: {act: "breakouts"},
+    calendar: {act: "stocks"}, digest: {act: "digest"}, screen: {act: "screen"}, lab: {act: "lab"},
+    portfolio: (a.holdings || []).length ? {act: "pftext", arg: a.holdings.map((h) => h.ticker + " " + h.shares).join(", ")} : {act: "pftab"},
+    paper: {act: "paper"}, alerts: {act: "alerts"},
+    paper_order: {act: "paperorder", arg: tk, side: a.side, value: a.value, shares: a.shares}, menu: {act: "home"},
+  };
+  const x = map[r.intent] || {act: "home"};
+  if (["why", "stock"].includes(x.act)) await follow();
+  if (x.act === "home") return showTab("home");
+  if (x.act === "stocks") return showTab("stocks");
+  if (x.act === "pftab") { showTab("portfolio"); return loadPortfolioTab(); }
+  return doAct(x, out);
+}
+$("#ask-form").onsubmit = (e) => { e.preventDefault(); askOne($("#ask-input").value); };
+
+// ---------- shareable cards ----------
+async function shareCard(kind, id, btn) {
+  const url = `/card/${kind}/${encodeURIComponent(id)}.svg?lang=${S.lang}`;
+  const box = document.createElement("div");
+  box.className = "histbox"; box.style.marginTop = "8px";
+  box.innerHTML = `<img src="${url}" style="width:100%;max-width:720px;border:1px solid var(--line);border-radius:10px;background:#fff" alt="">
+    <div class="toolbar"><button class="btn primary" data-pngdl="${esc(url)}" data-name="stockproof-${esc(kind)}-${esc(id)}.png">${esc(tr("d_card_png"))}</button>
+    <a class="btn" href="${url}" target="_blank" rel="noopener">${esc(tr("d_card_open"))}</a></div><p class="note">${esc(tr("d_card_note"))}</p>`;
+  btn.insertAdjacentElement("afterend", box); btn.disabled = true;
+}
+async function svgToPng(url, name) {
+  const svg = await (await fetch(url)).text();
+  const img = new Image();
+  img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
+  await img.decode();
+  const c = document.createElement("canvas"); c.width = 2400; c.height = 1350;
+  c.getContext("2d").drawImage(img, 0, 0, 2400, 1350);
+  c.toBlob((b) => { const a = document.createElement("a"); a.href = URL.createObjectURL(b); a.download = name; a.click(); }, "image/png");
+}
+document.addEventListener("click", (e) => {
+  const sc = e.target.closest("[data-share]");
+  if (sc) { const [k, id] = sc.dataset.share.split("|"); return shareCard(k, id, sc); }
+  const dl = e.target.closest("[data-pngdl]");
+  if (dl) return svgToPng(dl.dataset.pngdl, dl.dataset.name);
 });
 
 async function askWhy(tk, day) {
@@ -1312,7 +1374,10 @@ function renderHome() {
 }
 
 async function homeAction(ci, i) {
-  const x = homeCards()[ci].items.filter(Boolean)[i], out = $("#home-out-" + ci);
+  return doAct(homeCards()[ci].items.filter(Boolean)[i], $("#home-out-" + ci));
+}
+
+async function doAct(x, out) {
   if (x.act === "stocks") return showTab("stocks");
   if (x.act === "digest") return showTab("digest");
   if (x.act === "screen") return showTab("screen");
@@ -1322,6 +1387,16 @@ async function homeAction(ci, i) {
   if (x.act === "record") { out.innerHTML = `<p class="note">${esc(tr("d_lab_wait"))}</p>`; out.innerHTML = recordHTML(await api(`/api/team/record?lang=${S.lang}`)); return; }
   if (x.act === "money") { mmCat = x.arg; showTab("money"); return; }
   if (x.act === "paper") return showTab("paper");
+  if (x.act === "teamtext") { showTab("team"); $("#team-input").value = x.arg; return runTeamText(x.arg); }
+  if (x.act === "holders") { showTab("money"); setTimeout(() => { renderMoneyDetail(x.arg); const b = $("#mm-detail"); if (b) b.scrollIntoView({behavior: "smooth"}); }, 600); return; }
+  if (x.act === "pftext") { showTab("portfolio"); await loadPortfolioTab(); $("#pf-input").value = x.arg; return runPortfolio(); }
+  if (x.act === "paperorder") {
+    let A = []; try { A = (await api("/api/paper")).accounts.filter((a) => a.kind === "manual"); } catch (e) {}
+    const aid = A.length ? A[A.length - 1].id : (await api("/api/paper", {action: "new", name: tr("d_pp_default")})).id;
+    const r = await api("/api/paper", {action: x.side, account: aid, ticker: x.arg, value: x.value || 0, shares: x.shares || 0});
+    if (out) out.textContent = r.error ? r.error : tr("d_ask_paper_ok", {a: A.length ? A[A.length - 1].name : tr("d_pp_default")});
+    ppSel = aid; return showTab("paper");
+  }
   if (x.act === "alerts") { showTab("paper"); return loadPxAlerts(true); }
   if (x.act === "margin") { showTab("money"); setTimeout(() => { const m = $("#mm-margin"); if (m) m.scrollIntoView({behavior: "smooth"}); }, 800); return; }
   if (x.act === "breakouts") { showTab("screen"); setTimeout(() => $("#run-breakouts").click(), 300); return; }
@@ -1457,6 +1532,7 @@ function labResultHTML(r) {
   if ((r.years || []).length) h += `<p class="note">${r.years.map((y) => `${y.year}: ${y.excess === null ? "—" : (y.excess > 0 ? "+" : "") + (100 * y.excess).toFixed(1) + "%"}`).join(" · ")}</p>`;
   h += `<div class="toolbar"><a class="btn primary" href="${esc(r.report_url)}" target="_blank" rel="noopener">${esc(tr("d_lab_open"))}</a>`;
   if (r.phase === "explore" && v.code === "passes") h += `<button class="btn" data-confirm="${esc(r.id)}">${esc(tr("d_lab_confirm"))}</button>`;
+  if (r.id) h += `<button class="btn" data-share="lab|${esc(r.id)}">${esc(tr("d_card_make"))}</button>`;
   if (r.id && ["earnings", "forecast", "smart_money"].includes(r.spec.type)) h += `<button class="btn" data-paperexp="${esc(r.id)}">${esc(tr("d_pp_from_lab"))}</button>`;
   return h + `</div><p class="note">${esc(r.description)}</p>`;
 }

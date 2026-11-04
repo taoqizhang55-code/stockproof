@@ -860,6 +860,13 @@ def make_handler(app: Dashboard, port: int):
                             pass
                     svg = chart_svg.render(bars, tk, app.name_of(tk), self._lang(qs))
                     return self._send(200, svg, "image/svg+xml; charset=utf-8")
+                m = re.fullmatch(r"/card/(team|paper|lab)/([A-Za-z0-9.\-_]{1,64})\.svg", url.path)
+                if m:                                 # a shareable result card
+                    from stockproof import card
+                    svg = card.render(m.group(1), m.group(2), app._store(), app.data_dir, self._lang(qs))
+                    if svg is None:
+                        return self._send(404, {"error": "not found"})
+                    return self._send(200, svg, "image/svg+xml; charset=utf-8")
                 if not url.path.startswith("/api/"):
                     # a mistyped or pasted address (e.g. extra characters after the slash): go home
                     self.send_response(302)
@@ -947,6 +954,16 @@ def make_handler(app: Dashboard, port: int):
                     return self._send(200, app.paper_action(body))
                 except Exception as e:
                     return self._send(200, {"error": f"{type(e).__name__}: {str(e)[:160]}"})
+            if path == "/api/ask":
+                from stockproof import ask
+                text = str(body.get("text", ""))[:500]
+                client = None
+                if not app.demo:
+                    try:
+                        client = LLMClient.from_provider(app.provider, app.model_name, app.base_url)
+                    except Exception:
+                        client = None
+                return self._send(200, _clean({**ask.route(app, text, client), "argv": ask.cli_argv(ask.route(app, text))}))
             if path == "/api/pxalerts":
                 try:
                     return self._send(200, app.alerts_check(app.settings["lang"]))
