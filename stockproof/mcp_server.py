@@ -764,7 +764,7 @@ Type `/stockproof` for ready-made requests.
 Information and research, not investment advice."""
 
     # ---------------------------------------------------------------- dashboard
-    TABS = ("home", "stocks", "digest", "team", "screen", "money", "plan", "paper", "lab", "portfolio", "research")
+    TABS = ("home", "stocks", "digest", "team", "screen", "money", "paper", "lab", "portfolio", "research")
 
     def _dashboard_state(self, port: int) -> dict | None:
         import json as _json
@@ -796,7 +796,7 @@ Information and research, not investment advice."""
             time.sleep(0.2)
         return True
 
-    TOOL_TAB = {"long_term_plan": "plan", "paper_trading": "paper", "price_alerts": "paper", "research_team": "team", "team_track_record": "team", "money_map": "money", "smart_money": "money", "portfolio_checkup": "portfolio", "screen_stocks": "screen", "evidence_scorecard": "screen",
+    TOOL_TAB = {"long_term_plan": "paper", "paper_trading": "paper", "price_alerts": "paper", "research_team": "team", "team_track_record": "team", "money_map": "money", "smart_money": "money", "portfolio_checkup": "portfolio", "screen_stocks": "screen", "evidence_scorecard": "screen",
                 "daily_digest": "digest", "research_findings": "research", "watchlist": "stocks",
                 "stock_brief": "stocks", "why_did_it_move": "stocks", "compare_with_last_report": "stocks",
                 "company_announcements": "stocks", "refresh_stock": "stocks"}

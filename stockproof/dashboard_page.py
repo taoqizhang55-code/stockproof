@@ -135,7 +135,7 @@ BODY = """
 <div class="meta"><span id="model"></span><span id="daily"></span><span id="tip"></span></div>
 <form id="ask-form" class="askbar" autocomplete="off"><input id="ask-input" maxlength="500"><button class="btn primary" id="ask-go" type="submit"></button></form>
 <div id="ask-out" class="note" style="margin:6px 0 0"></div>
-<nav class="tabs"><button data-tab="home" id="tab-home"></button><button data-tab="stocks" id="tab-stocks"></button><button data-tab="digest" id="tab-digest"></button><button data-tab="team" id="tab-team"></button><button data-tab="screen" id="tab-screen"></button><button data-tab="money" id="tab-money"></button><button data-tab="plan" id="tab-plan"></button><button data-tab="paper" id="tab-paper"></button><button data-tab="lab" id="tab-lab"></button><button data-tab="portfolio" id="tab-portfolio"></button><button data-tab="research" id="tab-research"></button></nav>
+<nav class="tabs"><button data-tab="home" id="tab-home"></button><button data-tab="stocks" id="tab-stocks"></button><button data-tab="digest" id="tab-digest"></button><button data-tab="team" id="tab-team"></button><button data-tab="screen" id="tab-screen"></button><button data-tab="money" id="tab-money"></button><button data-tab="paper" id="tab-paper"></button><button data-tab="lab" id="tab-lab"></button><button data-tab="portfolio" id="tab-portfolio"></button><button data-tab="research" id="tab-research"></button></nav>
 <div id="view-home" hidden>
   <p class="note" id="home-intro" style="margin:12px 0 0"></p>
   <div class="home" id="home-cards"></div>
@@ -208,8 +208,17 @@ BODY = """
 </section>
 <section class="card" style="margin-top:12px"><h2 id="team-hist-h"></h2><div id="team-hist"></div></section>
 </div>
-<div id="view-plan" hidden>
+<div id="view-paper" hidden>
 <section class="card">
+  <h2 id="pp-h"></h2>
+  <p class="note" id="pp-lead"></p>
+  <div class="toolbar"><input id="pp-name" class="btn" style="width:160px"><input id="pp-cash" class="btn" style="width:120px" value="1000000">
+    <button class="btn primary" id="pp-new"></button><button class="btn" id="pp-fc"></button><button class="btn" id="pp-run"></button><span class="note" id="pp-msg"></span></div>
+  <div id="pp-accounts"></div>
+</section>
+<section class="card" style="margin-top:12px" id="pp-detail-card" hidden><div id="pp-detail"></div></section>
+<div id="view-plan-sec">
+<section class="card" style="margin-top:12px">
   <h2 id="pl-h"></h2>
   <p class="note" id="pl-lead"></p>
   <div class="toolbar"><select id="pl-profile" class="btn"></select>
@@ -220,15 +229,6 @@ BODY = """
 </section>
 <section class="card" style="margin-top:12px"><h2 id="pl-hist-h"></h2><div id="pl-hist"></div></section>
 </div>
-<div id="view-paper" hidden>
-<section class="card">
-  <h2 id="pp-h"></h2>
-  <p class="note" id="pp-lead"></p>
-  <div class="toolbar"><input id="pp-name" class="btn" style="width:160px"><input id="pp-cash" class="btn" style="width:120px" value="1000000">
-    <button class="btn primary" id="pp-new"></button><button class="btn" id="pp-fc"></button><button class="btn" id="pp-run"></button><span class="note" id="pp-msg"></span></div>
-  <div id="pp-accounts"></div>
-</section>
-<section class="card" style="margin-top:12px" id="pp-detail-card" hidden><div id="pp-detail"></div></section>
 <section class="card" style="margin-top:12px"><h2 id="al-h"></h2>
   <div class="toolbar"><button class="btn" id="al-check"></button><span class="note" id="al-meta"></span></div>
   <div id="al-list"></div></section>
@@ -345,7 +345,7 @@ function applyText() {
   $("#tab-screen").textContent = tr("d_tab_screen");
   $("#tab-money").textContent = tr("d_tab_money");
   $("#ask-input").placeholder = tr("d_ask_placeholder"); $("#ask-go").textContent = tr("d_ask_go");
-  $("#tab-plan").textContent = tr("d_tab_plan"); $("#pl-h").textContent = tr("d_pl_h"); $("#pl-lead").textContent = tr("d_pl_lead");
+$("#pl-h").textContent = tr("d_pl_h"); $("#pl-lead").textContent = tr("d_pl_lead");
   $("#pl-amt-l").textContent = tr("d_pl_amount"); $("#pl-go").textContent = tr("d_pl_go"); $("#pl-paper").textContent = tr("d_pl_paper");
   $("#pl-hold-l").textContent = tr("d_pl_hold"); $("#pl-hist-h").textContent = tr("d_pl_hist_h");
   $("#pl-profile").innerHTML = ["conservative", "balanced", "growth"].map((p) => `<option value="${p}"${p === "balanced" ? " selected" : ""}>${esc(tr("d_pl_p_" + p))}</option>`).join("");
@@ -779,7 +779,7 @@ async function askOne(text) {
   if (x.act === "home") return showTab("home");
   if (x.act === "stocks") return showTab("stocks");
   if (x.act === "ntsec") { showTab("money"); setTimeout(() => { const b = $("#nt-sec"); if (b) b.scrollIntoView({behavior: "smooth"}); }, 1500); return; }
-  if (x.act === "plantab") return showTab("plan");
+  if (x.act === "plantab") { showTab("paper"); setTimeout(() => $("#view-plan-sec").scrollIntoView({behavior: "smooth"}), 500); return; }
   if (x.act === "pftab") { showTab("portfolio"); return loadPortfolioTab(); }
   if (x.act === "day") { await follow(); showTab("stocks"); selected = tk; renderOverview(); await loadStock(); setTimeout(() => { showDay(tk, x.date); const b = $("#day-box"); if (b) b.scrollIntoView({behavior: "smooth", block: "center"}); }, 300); return; }
   return doAct(x, out);
@@ -1090,7 +1090,6 @@ function showTab(t) {
   $("#view-money").hidden = t !== "money";
   $("#view-team").hidden = t !== "team";
   $("#view-paper").hidden = t !== "paper";
-  $("#view-plan").hidden = t !== "plan";
   $("#view-portfolio").hidden = t !== "portfolio";
   renderMoves(); renderAlerts(); renderAnns(); renderCalendar();
   history.replaceState(null, "", t === "home" ? location.pathname : "#" + t);
@@ -1101,8 +1100,7 @@ function showTab(t) {
   if (t === "lab") loadLabTab();
   if (t === "money") { loadMoney(); loadMargin(); }
   if (t === "team") loadTeamTab();
-  if (t === "paper") { loadPaper(); loadPxAlerts(); }
-  if (t === "plan") loadPlan();
+  if (t === "paper") { loadPaper(); loadPxAlerts(); loadPlan(); }
   if (t === "portfolio") loadPortfolioTab();
 }
 

@@ -28,7 +28,7 @@ INTENTS = {
     "technical": ("stocks", "K 线和支撑阻力", "chart, support and resistance"),
     "smart_money": ("money", "谁在持有这只股票", "who holds this stock"),
     "nt_research": ("money", "跟着国家队做能不能赚钱", "can acting on the national team make money"),
-    "plan": ("plan", "长期投资计划", "long-term plan"),
+    "plan": ("paper", "长期投资计划", "long-term plan"),
     "forecast": ("stocks", "未来几个月的走势预测", "medium/long-horizon forecast"),
     "moneymap": ("money", "国家队 / 社保 / 北向在买什么", "what the national team / pensions / northbound bought"),
     "etf": ("money", "国家队 ETF 托底迹象", "national-team ETF buying"),
