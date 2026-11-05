@@ -543,7 +543,7 @@ class Dashboard:
             if self.job["running"]:
                 return False, "busy"
             tickers = list(self.settings["watchlist"])
-            if kind in ("screen", "moneymap", "etf", "margin", "moneyhistory"):
+            if kind in ("screen", "moneymap", "etf", "margin", "moneyhistory", "ntresearch"):
                 tickers = [kind]                      # whole market, independent of the watchlist
             elif not tickers:
                 return False, "empty"
@@ -569,6 +569,14 @@ class Dashboard:
                 with self.lock:
                     self.job["current"] = kind
                 margin.history(self.data_dir, 20, fetch=True)
+                with self.lock:
+                    self.job["done"] = 1
+                return
+            if kind == "ntresearch":
+                from stockproof import nt_research
+                with self.lock:
+                    self.job["current"] = kind
+                nt_research.run(self.data_dir, log=self._log, fetch_etf=True)
                 with self.lock:
                     self.job["done"] = 1
                 return
@@ -791,6 +799,13 @@ def make_handler(app: Dashboard, port: int):
                     store.conn.executescript(team.SCHEMA)
                     row = store.conn.execute("SELECT result FROM team_calls WHERE id=?", ((qs.get("id") or [""])[0],)).fetchone()
                     return self._send(200, json.loads(row[0]) if row else {"error": "not found"})
+                if url.path == "/api/day":
+                    from stockproof import dayinfo
+                    tk = (qs.get("ticker") or [""])[0].upper()
+                    day = (qs.get("date") or [""])[0]
+                    if not re.fullmatch(r"[A-Z0-9.\-]{1,16}", tk) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
+                        return self._send(400, {"error": "bad request"})
+                    return self._send(200, _clean(dayinfo.day_info(app._store(), app.data_dir, tk, day, self._lang(qs))))
                 if url.path == "/api/paper":
                     return self._send(200, app.paper_overview((qs.get("id") or [None])[0]))
                 if url.path == "/api/pxalerts":
@@ -801,6 +816,14 @@ def make_handler(app: Dashboard, port: int):
                     store = app._store()
                     team.score_calls(store, app.data_dir, fetch=False)
                     return self._send(200, _clean(team.track_record(store, self._lang(qs), limit=30)))
+                if url.path == "/api/ntresearch":
+                    from stockproof import nt_research
+                    r = nt_research.load(app.data_dir)
+                    if r is None:
+                        return self._send(200, {"need_run": True})
+                    zh = self._lang(qs) == "zh"
+                    return self._send(200, _clean({**r, "summary": nt_research.summary_text(r, self._lang(qs)),
+                                                   "kind_labels": nt_research.KIND_ZH if zh else {k: k for k in nt_research.KIND_ZH}}))
                 if url.path == "/api/moneyhistory":
                     from stockproof import flows
                     import re as _re
@@ -1028,7 +1051,7 @@ def make_handler(app: Dashboard, port: int):
             if path == "/api/refresh":
                 kind = body.get("kind")
                 if kind not in ("news", "earnings", "research_us", "research_cn", "screen", "moneymap", "etf", "margin",
-                                "moneyhistory"):
+                                "moneyhistory", "ntresearch"):
                     return self._send(400, {"error": "unknown refresh kind"})
                 ok, msg = app.start_refresh(kind)
                 return self._send(200 if ok else 409, {"ok": ok, "message": msg})

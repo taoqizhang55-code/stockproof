@@ -43,6 +43,7 @@ How to use it well:
 - "分析一下 X" / "X 能买吗" / "give me a view on X" -> research_team; pass what the user wants discussed as `question`
   in their words (e.g. "重点看扣非亏损会不会持续") (a cited multi-analyst view, logged and
   scored later; never present it as advice or an order). "How accurate is the team?" -> team_track_record.
+- "跟着国家队买能赚钱吗 / 预测国家队下季度买什么" -> national_team_research (not money_map).
 - Not sure which tool fits a sentence -> ask(text) returns the tool and arguments to call. "做成卡片 / 分享 /
   share this" -> share_card(kind, id) for a team call_id, a paper account or a lab experiment id.
 - 模拟盘 / paper trading -> paper_trading(action=...): list, show, new, buy, sell, run, gap, strategy (a lab
@@ -494,7 +495,7 @@ class Tools:
                             + (" 持续盯盘：在终端运行 stockproof alerts --watch。" if lang == "zh" else
                                " For continuous watching run `stockproof alerts --watch`.")})
 
-    TOOL_FOR = {"team": "research_team", "team_record": "team_track_record", "why": "why_did_it_move",
+    TOOL_FOR = {"nt_research": "national_team_research", "day": "day_detail", "team": "research_team", "team_record": "team_track_record", "why": "why_did_it_move",
                 "technical": "technical_analysis", "smart_money": "smart_money", "moneymap": "money_map",
                 "etf": "national_team_etf", "margin": "market_leverage", "breakouts": "scan_market",
                 "compare": "compare_with_last_report", "calendar": "earnings_calendar", "digest": "daily_digest",
@@ -507,7 +508,7 @@ class Tools:
         client, _ = self._client()
         r = ask.route(self.app, text, client)
         a, tk = r["args"], r["ticker"]
-        args = {"team": {"ticker": tk, "question": a.get("question")}, "why": {"ticker": tk}, "technical": {"ticker": tk, "open_chart": False},
+        args = {"day": {"ticker": tk, "date": a.get("date")}, "team": {"ticker": tk, "question": a.get("question")}, "why": {"ticker": tk}, "technical": {"ticker": tk, "open_chart": False},
                 "smart_money": {"ticker": tk}, "moneymap": {"category": a.get("category", "national")},
                 "compare": {"ticker": tk}, "scorecard": {"ticker": tk},
                 "portfolio": {"holdings": a.get("holdings", [])}, "breakouts": {"direction": a.get("direction", "both")},
@@ -517,6 +518,36 @@ class Tools:
                             "howto": "Call next_tool with next_args now (for paper_order, the account defaults to the latest "
                                      "manual paper account: call paper_trading(action='list') first if unsure). If the "
                                      "intent looks wrong for what the user said, pick the right tool yourself."})
+
+    def national_team_research(self, refresh: bool = False, lang: str | None = None) -> dict:
+        from stockproof import nt_research as nr
+        r = nr.load(self.app.data_dir)
+        if r is None or refresh:
+            try:
+                r = nr.run(self.app.data_dir, log=lambda *a: None)
+            except Exception as e:
+                return {"error": f"{type(e).__name__}: {str(e)[:200]}",
+                        "howto": "Needs the holder history (stockproof moneymap --history 2016) and research prices."}
+        lang = self._lang(lang)
+        s = r["signals"]
+        return self._clean({
+            "conclusions": nr.summary_text(r, lang), "made": r["made"], "universe": r["universe"],
+            "signal_tests": sorted(s["tests"], key=lambda t: -abs(t["t"] or 0)), "bar": s["bar"], "n_tests": s["n_tests"],
+            "period": s["period"], "etf_timing": r["etf"],
+            "forecast": {k: v for k, v in r["predict"].items() if k != "quarters"},
+            "note": "diff = 60-day return after the disclosure minus other stocks disclosed the same month (t clustered by "
+                    "month). Present the conclusions; the forecast is not a buy list (buying it ahead never paid). Not advice."})
+
+    def day_detail(self, ticker: str, date: str, lang: str | None = None) -> dict:
+        from stockproof import dayinfo, quotes
+        from stockproof.store import Store
+        tk = self._tk(ticker)
+        if len(quotes.load_bars(self.app.data_dir, tk).dropna(subset=["close"])) < 30:
+            try:
+                quotes.update(self.app.data_dir, tk)
+            except Exception as e:
+                return {"error": f"prices unavailable ({type(e).__name__})"}
+        return self._clean(dayinfo.day_info(Store(self.app.data_dir), self.app.data_dir, tk, date, self._lang(lang)))
 
     def share_card(self, kind: str, id: str, lang: str | None = None) -> dict:
         from urllib.parse import quote
@@ -566,11 +597,11 @@ class Tools:
                          "腾讯这期财报和上期比变了什么？", "下周谁发财报？", "今天的简报"]),
                       g("AI 投研团队", ["research_team", "team_track_record"],
                         ["让 AI 投研团队分析一下科大讯飞", "AI 团队过去的判断准不准？"]),
-                      g("一句话与分享卡片", ["ask", "share_card"],
-                        ["茅台能买吗？", "把刚才投研团队的结论做成分享卡片", "把我的模拟盘做成卡片"]),
+                      g("一句话与分享卡片", ["ask", "share_card", "day_detail"],
+                        ["茅台能买吗？", "科大讯飞 10 月 15 号那天发生了什么？", "把刚才投研团队的结论做成分享卡片"]),
                       g("模拟盘与提醒", ["paper_trading", "price_alerts"],
                         ["建一个模拟盘，用 10 万模拟买入贵州茅台", "我的模拟盘跑赢沪深300 了吗？", "我的股票有没有突破或到达计划价位？"]),
-                      g("资金地图", ["money_map", "national_team_etf", "market_leverage", "smart_money"],
+                      g("资金地图", ["national_team_research", "money_map", "national_team_etf", "market_leverage", "smart_money"],
                         ["国家队这个季度买了什么？", "最近有没有国家队托底的迹象？", "杠杆资金最近在加仓还是撤退？", "社保基金加仓了哪些行业？", "科大讯飞的十大股东里有没有国家队？"]),
                       g("选股与评分卡", ["screen_stocks", "scan_market", "evidence_scorecard"],
                         ["全市场业绩最强的 A 股有哪些？", "今天全市场哪些股票放量突破了？", "江波龙的证据评分卡"]),
@@ -587,11 +618,11 @@ class Tools:
                          "What changed in Tencent's latest report?", "Who reports next week?"]),
                       g("AI research team", ["research_team", "team_track_record"],
                         ["Have the research team analyse NVDA", "How accurate has the team been?"]),
-                      g("One sentence & share cards", ["ask", "share_card"],
+                      g("One sentence & share cards", ["ask", "share_card", "day_detail"],
                         ["Should I buy NVDA?", "Make a share card of the team's view", "Make a card of my paper account"]),
                       g("Paper trading & alerts", ["paper_trading", "price_alerts"],
                         ["Open a paper account and buy 10k of NVDA", "Is my paper account beating the index?", "Any alerts on my stocks?"]),
-                      g("Smart money", ["money_map", "national_team_etf", "market_leverage", "smart_money"],
+                      g("Smart money", ["national_team_research", "money_map", "national_team_etf", "market_leverage", "smart_money"],
                         ["What did the national team buy this quarter?", "Who holds 002230 among the big funds?"]),
                       g("Screen & scorecards", ["screen_stocks", "scan_market", "evidence_scorecard"],
                         ["Strongest A-shares by fundamentals?", "Which A-shares broke out today?", "Evidence scorecard for 301308"]),
@@ -904,6 +935,10 @@ PROMPTS = [
     ("team", "AI 投研团队：分析一只股票", "Five AI analysts, a bull/bear debate and a PM's view, logged and scored later", "ticker",
      "用 research_team 让 AI 投研团队分析 {x}：先说结论（观点、置信度、观察期）、观察计划和风险，说明置信度为什么是这个水平，"
      "引用证据编号；说明这次判断已记入前瞻日志、到期会打分。不是买卖建议。"),
+    ("ntresearch", "跟着国家队做能赚钱吗", "Can acting on the national team make money?", None,
+     "用 national_team_research 回答：跟着（或反着）国家队、社保、险资、北向的披露去买或回避，历史上能不能赚钱；ETF 托底之后大盘怎么走；"
+     "下季度国家队最可能新进哪些股票、这种预测准不准、提前买赚不赚。先说结论，再给关键数字（和同月其他披露比的差、t 值、门槛），"
+     "说明预测名单不是买入名单，这是历史研究不是投资建议。"),
     ("ask", "一句话问", "Ask anything in one sentence; stockproof picks the feature", "question",
      "{x}\n（用 stockproof 回答：先用 ask 找到合适的工具和参数，再调用它；结论要带出处，不是投资建议。）"),
     ("card", "生成分享卡片", "Make a shareable card of a team call, a paper account or a lab result", "what",
@@ -1192,6 +1227,24 @@ def build_server(tools: Tools):
         to the right stockproof tool and its arguments (rules first, LLM only if no rule fits). Returns next_tool and
         next_args; call that tool next. Use when unsure which tool fits."""
         return tools.ask(text, lang)
+
+    @srv.tool()
+    def national_team_research(refresh: bool = False, lang: str | None = None) -> dict:
+        """"跟着国家队做能不能赚钱": tests 24 signals (national team / pensions / northbound / insurers / QFII / funds x
+        new / add / reduce / exit) against other stocks disclosed the same month, with a multiple-testing bar and a
+        locked holdout; the CSI 300 after ETF rescue and big-redemption days; and a walk-forward forecast of next
+        quarter's national-team new entries (accuracy and whether buying ahead paid). Use for questions about
+        following, copying, front-running or predicting the national team or other big holders."""
+        return tools.national_team_research(refresh, lang)
+
+    @srv.tool()
+    def day_detail(ticker: str, date: str, lang: str | None = None) -> dict:
+        """What happened to one stock on one day (YYYY-MM-DD; a non-trading day uses the one before): the bar,
+        the move vs the market, volume vs normal, zones crossed or touched, MA20/MA60, signals that fired, news /
+        announcements / reports around it, research-team calls and paper fills that day, and (labelled hindsight)
+        returns 5 / 20 / 60 trading days later. Use for "那天怎么了", "3月5号发生了什么". For the cause, follow
+        with why_did_it_move(ticker, date)."""
+        return tools.day_detail(ticker, date, lang)
 
     @srv.tool()
     def share_card(kind: str, id: str, lang: str | None = None) -> dict:

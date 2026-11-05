@@ -23,6 +23,8 @@ class App:
     ("最近有没有托底", "etf", None),
     ("AI 团队准不准", "team_record", None),
     ("随便聊聊", "menu", None),
+    ("跟着国家队买能赚钱吗", "nt_research", None),
+    ("能预测下季度国家队买什么吗", "nt_research", None),
     ("why did NVDA drop", "why", "NVDA"),
 ])
 def test_route(text, intent, ticker):

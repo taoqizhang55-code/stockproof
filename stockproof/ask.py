@@ -23,9 +23,11 @@ CATEGORIES = {"国家队": "national", "汇金": "national", "社保": "social",
 
 INTENTS = {
     "team": ("team", "AI 投研团队分析一只股票", "AI research team view on a stock"),
+    "day": ("stocks", "某一天发生了什么", "what happened on a day"),
     "why": ("stocks", "为什么涨跌", "why a stock moved"),
     "technical": ("stocks", "K 线和支撑阻力", "chart, support and resistance"),
     "smart_money": ("money", "谁在持有这只股票", "who holds this stock"),
+    "nt_research": ("money", "跟着国家队做能不能赚钱", "can acting on the national team make money"),
     "moneymap": ("money", "国家队 / 社保 / 北向在买什么", "what the national team / pensions / northbound bought"),
     "etf": ("money", "国家队 ETF 托底迹象", "national-team ETF buying"),
     "margin": ("money", "杠杆资金（融资余额）", "margin financing"),
@@ -45,6 +47,7 @@ INTENTS = {
 }
 
 RULES = [   # (intent, pattern, needs a stock)
+    ("day", r"(\d{1,2}\s*月\s*\d{1,2}\s*[日号]|\d{4}-\d{2}-\d{2}|昨天|前天).{0,10}(怎么|发生|干什么|什么情况)|那天", True),
     ("paper_order", r"模拟(买|卖|下单)|paper (buy|sell)|(买|卖).{0,12}模拟", True),
     ("paper", r"模拟盘|模拟账户|paper (account|trading)|跑赢.*(沪深|大盘).*模拟", False),
     ("alerts", r"提醒|盯盘|到价|alert", False),
@@ -53,6 +56,7 @@ RULES = [   # (intent, pattern, needs a stock)
     ("etf", r"托底|ETF.{0,6}(申购|份额)|national team ETF", False),
     ("margin", r"融资|杠杆|两融|margin", False),
     ("smart_money", r"股东|主力|龙虎榜|谁(在)?(买|持有)|who holds", True),
+    ("nt_research", r"(跟着|反着|根据|观察).{0,8}(国家队|社保|险资|北向).{0,12}(赚|买|做)|(国家队|社保).{0,10}(赚钱|赚翻)|预测.{0,10}(国家队|社保)|下(个)?季度.{0,10}(国家队|社保)", False),
     ("moneymap", "|".join(CATEGORIES), False),
     ("why", r"为什么.{0,4}(涨|跌|大涨|大跌|暴涨|暴跌)|为啥.{0,4}(涨|跌)|why .*(move|drop|fall|rise|up|down|jump)", True),
     ("technical", r"[kK] ?线|支撑|压力位|阻力|均线|技术面|图形|chart|support|resistance", True),
@@ -98,6 +102,23 @@ def holdings(text: str) -> list[dict]:
     return out
 
 
+def parse_date(text: str, today=None) -> str:
+    import datetime as dt
+    today = today or dt.date.today()
+    m = re.search(r"(\d{4})-(\d{2})-(\d{2})", text)
+    if m:
+        return m.group(0)
+    m = re.search(r"(?:(\d{4})\s*年\s*)?(\d{1,2})\s*月\s*(\d{1,2})", text)
+    if m:
+        y = int(m.group(1) or today.year)
+        d = dt.date(y, int(m.group(2)), int(m.group(3)))
+        if not m.group(1) and d > today:
+            d = d.replace(year=y - 1)
+        return d.isoformat()
+    back = 2 if "前天" in text else 1 if "昨天" in text else 0
+    return (today - dt.timedelta(days=back)).isoformat()
+
+
 def route(app, text: str, client=None) -> dict:
     """{intent, ticker, args, how, tab, label}. how: rules | llm | default."""
     t = str(text or "").strip()
@@ -114,6 +135,8 @@ def route(app, text: str, client=None) -> dict:
     if intent is None:
         intent, how = ("team" if tk else "menu"), "default"
     args: dict = {}
+    if intent == "nt_research" and tk:
+        intent = "smart_money"
     if intent == "moneymap":
         args["category"] = next((v for k, v in CATEGORIES.items() if k.lower() in low), "national")
         if tk:                                   # "国家队有没有买科大讯飞" -> the stock's holders
@@ -135,6 +158,8 @@ def route(app, text: str, client=None) -> dict:
         args["question"] = t if len(re.sub(r"[\s\W]", "", rest)) >= 2 else None
     if intent in ("breakouts",):
         args["direction"] = "down" if "跌破" in t else "up" if "突破" in t and "跌破" not in t else "both"
+    if intent == "day":
+        args["date"] = parse_date(t)
     tab, zh_label, en_label = INTENTS[intent]
     return {"text": t, "intent": intent, "ticker": tk, "args": args, "how": how, "tab": tab,
             "label": zh_label, "label_en": en_label}
@@ -162,12 +187,16 @@ def cli_argv(r: dict) -> list[str] | None:
         return ["team", "--record"]
     if i == "moneymap":
         return ["moneymap", "--category", a.get("category", "national")]
+    if i == "nt_research":
+        return ["moneymap", "--research"]
     if i == "smart_money":
         return ["moneymap", "--ticker", tk]
     if i == "etf":
         return ["moneymap", "--etf"]
     if i == "margin":
         return ["moneymap", "--margin"]
+    if i == "day":
+        return ["day", tk, a["date"]]
     if i == "breakouts":
         return ["breakouts"]
     if i == "portfolio" and a.get("holdings"):

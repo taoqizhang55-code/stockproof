@@ -689,6 +689,31 @@ def cmd_card(args) -> int:
     return 0
 
 
+def cmd_day(args) -> int:
+    """What happened to a stock on one day."""
+    from stockproof import dayinfo
+    from stockproof.store import Store
+    zh = args.lang == "zh"
+    tk = cn.canonical(args.ticker) if cn.is_cn(args.ticker) else args.ticker.upper()
+    r = dayinfo.day_info(Store(args.data_dir), args.data_dir, tk, args.date, args.lang)
+    if r.get("error"):
+        print(r["error"] + ("（先运行 stockproof team 或在看板里打开这只股票，下载价格）" if zh else ""))
+        return 1
+    print(f"{tk} {r['date']}  O {r['open']}  H {r['high']}  L {r['low']}  C {r['close']}")
+    for f in r["facts"]:
+        print("  · " + f)
+    for sg in r["signals"]:
+        print("  · " + sg["rule"])
+    for e in r["evidence"]:
+        print(f"  [{e['kind']}] {e['date']} {e['title'][:80]} {e.get('link') or ''}")
+    for c in r["team_calls"]:
+        print(f"  {'投研团队' if zh else 'team'}: {c['stance']} ({c['id']})")
+    if r["after"]:
+        print("  " + ("事后：" if zh else "afterwards: ") + " · ".join(f"{n}d {100 * v:+.1f}%" for n, v in r["after"].items())
+              + "  (" + r["after_note"] + ")")
+    return 0
+
+
 def cmd_paper(args) -> int:
     """Paper trading: accounts, orders filled at later opens with pessimistic rules, NAV vs the market."""
     import json as _json
@@ -803,6 +828,33 @@ def cmd_moneymap(args) -> int:
     """Smart-money map for one quarter, or one stock's big holders."""
     from stockproof import flows
     zh = args.lang == "zh"
+    if args.research:
+        from stockproof import nt_research as nr
+        r = nr.load(args.data_dir)
+        if r is None or args.refresh:
+            print("跟着国家队做能不能赚钱：三项检验（约 1 分钟；--refresh-etf 会先补齐 ETF 份额，要几分钟）……" if zh else
+                  "Can acting on the national team make money: three studies (about a minute) ...")
+            r = nr.run(args.data_dir, log=print, fetch_etf=args.refresh_etf)
+        print(("结论（" if zh else "Conclusions (") + r["made"] + ("，价格范围：今天的沪深300 成分股）" if zh else "; universe: today's CSI 300)"))
+        for line in nr.summary_text(r, args.lang):
+            print("  · " + line)
+        s = r["signals"]
+        print()
+        print(("每种信号 60 天后和同月其他披露股票的差（探索期 " if zh else "Each signal vs other disclosures that month (exploration ")
+              + f"{s['period'][0]} – {s['period'][1]}; |t| ≥ {s['bar']}):")
+        for t in sorted(s["tests"], key=lambda t: -abs(t["t"] or 0)):
+            nm = (nr.KIND_ZH[t["kind"]] + nr.ACT_ZH[t["action"]]) if zh else f"{t['kind']} {t['action']}"
+            print(f"  {nm:12s} n={t['n']:5d}  {100 * (t['diff'] or 0):+5.1f}%  t={t['t'] or 0:+5.2f}"
+                  + ("  ✓" if t["passes"] else ""))
+        p = r["predict"]
+        if p.get("latest_picks"):
+            print()
+            print((f"{p['latest_quarter']} 季度最可能被国家队新进的股票（预测，没法提前验证；历史上买它们不赚钱）：" if zh else
+                   f"Most likely national-team new entries for {p['latest_quarter']} (a forecast; buying them never paid):"))
+            for x in p["latest_picks"][:10]:
+                print(f"  {x['ticker']} {x.get('name', '')}  {100 * x['prob']:.0f}%")
+        print("  " + ("这是历史研究，不是投资建议。" if zh else "Historical research, not advice."))
+        return 0
     if args.etf:
         from stockproof import etf_flows
         print("重点宽基 ETF 每日净申购（第一次要下载约 4 个月的份额，几分钟）……" if zh else "Key broad ETFs, daily net creations ...")
@@ -1434,6 +1486,13 @@ def build_parser() -> argparse.ArgumentParser:
     ak.add_argument("--base-url")
     ak.set_defaults(func=cmd_ask)
 
+    dy = sub.add_parser("day", help="what happened to a stock on one day: stockproof day 002230 2026-10-15")
+    dy.add_argument("ticker")
+    dy.add_argument("date")
+    dy.add_argument("--lang", default="zh", choices=["en", "zh"])
+    dy.add_argument("--data-dir", default=DATA_DIR)
+    dy.set_defaults(func=cmd_day)
+
     cd = sub.add_parser("card", help="shareable result card: team <call_id> | paper <account> | lab <experiment id>")
     cd.add_argument("kind", choices=["team", "paper", "lab"])
     cd.add_argument("id")
@@ -1476,6 +1535,10 @@ def build_parser() -> argparse.ArgumentParser:
     mm.add_argument("--margin", action="store_true", help="instead: margin financing, market-wide and most changed")
     mm.add_argument("--test", action="store_true", help="instead: history test of buying after each kind's disclosed moves")
     mm.add_argument("--etf", action="store_true", help="instead: the national team's ETF channel (daily net creations)")
+    mm.add_argument("--research", action="store_true",
+                    help="instead: can acting on the national team make money? signal tests, ETF timing, next-quarter forecast")
+    mm.add_argument("--refresh", action="store_true", help="--research: recompute")
+    mm.add_argument("--refresh-etf", action="store_true", help="--research: first fill missing days of ETF share counts")
     mm.add_argument("--history", metavar="YEAR", help="download every quarter since YEAR (for history tests)")
     mm.add_argument("--lang", default="zh", choices=["en", "zh"])
     mm.add_argument("--data-dir", default=DATA_DIR)
@@ -1565,6 +1628,7 @@ MENU = {
                     ("daily", "更新关注列表并生成每日简报"),
                     ("calendar", "未来两周谁发财报"),
                     ("schedule --time 21:00", "每晚自动更新（Mac / Windows / Linux）")]),
+        ("跟着国家队做", [("moneymap --research", "检验：跟着/反着国家队、社保、险资的披露做能不能赚钱；ETF 托底；预测下季度新进")]),
         ("一句话与分享卡片", [('ask "茅台能买吗"', "一句话直接问：自动找到对应的功能（投研团队、为什么涨跌、资金地图、模拟盘……）"),
                         ("card team <记录编号>", "分享卡片：投研团队判断 / 模拟盘（card paper 账户名）/ 实验结果（card lab 实验编号）")]),
         ("选股与评分卡", [("screen", "全市场 A 股选股名单和理由"),

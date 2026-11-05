@@ -90,6 +90,7 @@ h3 { font-size:15px; margin:18px 0 6px; }
 .overall b { font-size:28px; font-variant-numeric:tabular-nums; }
 .reasons { font-size:13px; color:var(--muted); }
 .btn.sm { padding:4px 9px; font-size:13px; }
+.khit { fill:transparent; cursor:pointer; } .khit:hover { fill:rgba(120,120,128,.14); } .khit.on { fill:rgba(58,91,217,.18); }
 .askbar { display:flex; gap:8px; margin:14px 0 0; }
 .askbar input { flex:1; min-width:0; font:inherit; font-size:16px; padding:11px 14px; border:1px solid var(--line); border-radius:12px; background:var(--card); color:var(--text); }
 .home { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:16px; margin-top:16px; }
@@ -374,7 +375,7 @@ function renderStatus() {
     prog.firstElementChild.style.width = (j.total ? 100 * j.done / j.total : 0) + "%";
     const cur = (j.kind || "").startsWith("research_") ? tr("d_tab_research") + " · " + tr("d_market_" + j.kind.slice(9))
       : j.kind === "screen" ? tr("d_tab_screen") : j.kind === "moneymap" ? tr("d_tab_money") : j.kind === "etf" ? tr("d_etf_title")
-      : j.kind === "margin" ? tr("d_margin_title") : j.kind === "moneyhistory" ? tr("d_mm_hist_title") : (j.current || "…");
+      : j.kind === "margin" ? tr("d_margin_title") : j.kind === "ntresearch" ? tr("d_nt_h") : j.kind === "moneyhistory" ? tr("d_mm_hist_title") : (j.current || "…");
     st.textContent = tr("d_running", {current: cur, done: j.done, total: j.total});
   } else if (j.error) {
     st.innerHTML = `<span class="err">${esc(tr("d_failed", {error: j.error}))}</span>`;
@@ -493,9 +494,10 @@ function candleSVG(c, zh) {
     const dir = s.direction || (s.bullish ? "bullish" : "bearish"); if (dir === "neutral") return;
     const bull = dir === "bullish", yy = bull ? y(lo[i]) + 12 : y(hi[i]) - 12, col = bull ? up : down;
     g += `<text x="${x(i)}" y="${yy}" font-size="11" text-anchor="middle" fill="${col}">${bull ? "▲" : "▼"}<title>${s.date} ${esc(tr("ta_" + s.kind))}</title></text>`; });
+  for (let i = 0; i < n; i++) if (c.close[i] != null) g += `<rect class="khit" data-kday="${c.dates[i]}" x="${x(i) - step / 2}" y="0" width="${step}" height="${PH + VH}"/>`;
   [0, Math.floor(n / 2), n - 1].forEach((i) => { g += `<text x="${Math.min(Math.max(x(i), 30), W - PAD - 30)}" y="${PH + VH + 14}" font-size="10" text-anchor="middle" fill="var(--muted)">${c.dates[i]}</text>`; });
   const legend = `<div class="note" style="display:flex;gap:12px;flex-wrap:wrap"><span style="color:#e3a008">— MA5</span><span style="color:#3b6fd8">— MA20</span><span style="color:#9b59b6">— MA60</span><span><span style="background:#1f8a4c33;padding:0 6px">&nbsp;</span> ${esc(tr("ta_support"))}</span><span><span style="background:#d23c3c33;padding:0 6px">&nbsp;</span> ${esc(tr("ta_resistance"))}</span><span>▲▼ ${esc(tr("ta_signals"))}</span></div>`;
-  return `<svg viewBox="0 0 ${W} ${PH + VH + 18}" style="width:100%;height:auto;display:block">${g}</svg>${legend}`;
+  return `<svg class="kchart" viewBox="0 0 ${W} ${PH + VH + 18}" style="width:100%;height:auto;display:block">${g}</svg>${legend}<p class="note">${esc(tr("d_day_hint"))}</p><div id="day-box"></div>`;
 }
 
 function techHTML(t) {
@@ -746,9 +748,9 @@ async function askOne(text) {
   const tk = r.ticker, a = r.args || {};
   const follow = async () => { if (tk && !S.watchlist.includes(tk)) S = await api("/api/watchlist", {tickers: [...S.watchlist, tk]}); };
   const map = {
-    team: {act: "teamtext", arg: text}, team_record: {act: "teamtab"},
+    team: {act: "teamtext", arg: text}, team_record: {act: "teamtab"}, day: {act: "day", arg: tk, date: a.date},
     why: {act: "why", arg: tk}, technical: {act: "stock", arg: tk}, compare: {act: "stock", arg: tk}, scorecard: {act: "stock", arg: tk},
-    smart_money: {act: "holders", arg: tk}, moneymap: {act: "money", arg: a.category || "national"},
+    nt_research: {act: "ntsec"}, smart_money: {act: "holders", arg: tk}, moneymap: {act: "money", arg: a.category || "national"},
     etf: {act: "money", arg: "national"}, margin: {act: "margin"}, breakouts: {act: "breakouts"},
     calendar: {act: "stocks"}, digest: {act: "digest"}, screen: {act: "screen"}, lab: {act: "lab"},
     portfolio: (a.holdings || []).length ? {act: "pftext", arg: a.holdings.map((h) => h.ticker + " " + h.shares).join(", ")} : {act: "pftab"},
@@ -759,7 +761,9 @@ async function askOne(text) {
   if (["why", "stock"].includes(x.act)) await follow();
   if (x.act === "home") return showTab("home");
   if (x.act === "stocks") return showTab("stocks");
+  if (x.act === "ntsec") { showTab("money"); setTimeout(() => { const b = $("#nt-sec"); if (b) b.scrollIntoView({behavior: "smooth"}); }, 1500); return; }
   if (x.act === "pftab") { showTab("portfolio"); return loadPortfolioTab(); }
+  if (x.act === "day") { await follow(); showTab("stocks"); selected = tk; renderOverview(); await loadStock(); setTimeout(() => { showDay(tk, x.date); const b = $("#day-box"); if (b) b.scrollIntoView({behavior: "smooth", block: "center"}); }, 300); return; }
   return doAct(x, out);
 }
 $("#ask-form").onsubmit = (e) => { e.preventDefault(); askOne($("#ask-input").value); };
@@ -788,6 +792,45 @@ document.addEventListener("click", (e) => {
   if (sc) { const [k, id] = sc.dataset.share.split("|"); return shareCard(k, id, sc); }
   const dl = e.target.closest("[data-pngdl]");
   if (dl) return svgToPng(dl.dataset.pngdl, dl.dataset.name);
+});
+
+// ---------- click a candle: that day ----------
+let dayTk = null, dayDate = null;
+async function showDay(tk, date) {
+  const box = $("#day-box"); if (!box) return;
+  dayTk = tk; dayDate = date;
+  document.querySelectorAll(".khit.on").forEach((r) => r.classList.remove("on"));
+  const hit = document.querySelector(`.khit[data-kday="${date}"]`); if (hit) hit.classList.add("on");
+  box.innerHTML = `<p class="note">…</p>`;
+  let r; try { r = await api(`/api/day?ticker=${encodeURIComponent(tk)}&date=${date}&lang=${S.lang}`); } catch (e) { r = {error: e.message}; }
+  if (dayDate !== date) return;
+  if (r.error) { box.innerHTML = `<p class="err">${esc(r.error)}</p>`; return; }
+  const num = (v) => v == null ? "—" : Number(v).toFixed(v < 1 ? 3 : 2);
+  let h = `<div class="histbox"><h3>${esc(r.date)} <span class="note">${esc(tr("d_day_keys"))}</span></h3>
+    <div class="grid"><div class="kv"><b>${esc(tr("d_day_ohlc"))}</b>${num(r.open)} / ${num(r.high)} / ${num(r.low)} / ${num(r.close)}</div>
+    <div class="kv"><b>${esc(tr("d_today"))}</b>${r.ret == null ? "—" : pctChip(r.ret)}</div>
+    <div class="kv"><b>${esc(tr("d_day_excess"))}</b>${r.excess == null ? "—" : pctChip(r.excess)}</div>
+    <div class="kv"><b>${esc(tr("d_day_vol"))}</b>${r.vol_ratio == null ? "—" : r.vol_ratio + "×"}</div></div>
+    <ul class="pts">${(r.facts || []).map((f) => `<li>${esc(f)}</li>`).join("")}${(r.signals || []).map((s) => `<li>${s.bullish ? "▲" : "▼"} ${esc(tr("ta_" + s.kind))} <span class="note">— ${esc(s.rule)}</span></li>`).join("")}</ul>`;
+  const ev = r.evidence || [];
+  h += ev.length ? `<h3>${esc(tr("d_day_ev"))}</h3><ul class="pts">${ev.map((e) => `<li><span class="note">${esc(e.date)} · ${esc(tr("d_day_k_" + e.kind) || e.kind)}</span> ${e.link ? `<a href="${esc(e.link)}" target="_blank" rel="noopener">${esc(e.title)}</a>` : esc(e.title)}${e.note ? ` <span class="note">— ${esc(e.note)}</span>` : ""}</li>`).join("")}</ul>`
+    : `<p class="note">${esc(tr("d_day_noev"))}</p>`;
+  (r.team_calls || []).forEach((c) => { h += `<p class="note">🧠 ${esc(tr("d_day_team", {s: tr("d_stance_" + c.stance), id: c.id}))}</p>`; });
+  (r.paper_fills || []).forEach((f) => { h += `<p class="note">📒 ${esc(tr("d_day_fill", {a: f.account, side: f.side === "buy" ? tr("d_pp_buy") : tr("d_pp_sell"), n: f.shares, p: f.price}))}</p>`; });
+  const af = Object.entries(r.after || {});
+  if (af.length) h += `<p>${esc(tr("d_day_after"))} ${af.map(([n, v]) => `${esc(tr("d_day_nd", {n}))} ${pctChip(v)}`).join(" · ")}</p><p class="note">${esc(r.after_note)}</p>`;
+  h += `<div class="toolbar"><button class="btn" data-why="${esc(tk)}" data-day="${esc(r.date)}">${esc(tr("d_why"))}</button></div></div>`;
+  box.innerHTML = h;
+}
+document.addEventListener("click", (e) => {
+  const k = e.target.closest(".khit");
+  if (k && selected) showDay(selected, k.dataset.kday);
+});
+document.addEventListener("keydown", (e) => {
+  if (!dayDate || !["ArrowLeft", "ArrowRight"].includes(e.key) || /INPUT|TEXTAREA/.test(document.activeElement.tagName)) return;
+  const all = [...document.querySelectorAll(".khit")].map((r) => r.dataset.kday), i = all.indexOf(dayDate);
+  const j = i + (e.key === "ArrowLeft" ? -1 : 1);
+  if (i >= 0 && j >= 0 && j < all.length) { e.preventDefault(); showDay(dayTk, all[j]); }
 });
 
 async function askWhy(tk, day) {
@@ -1009,7 +1052,7 @@ function renderMoney() {
   if (ht && (ht.new || ht.add)) {
     const one = (k) => ht[k] ? `${tr("d_mm_" + k)}：${tr("d_mm_ht_one", {a: pct1(ht[k].ann), t: ht[k].t != null ? ht[k].t.toFixed(1) : "—", n: ht[k].events, b: pct1(ht[k].ann_2x)})}` : "";
     const good = [ht.new, ht.add].some((x) => x && x.ann > 0 && x.t >= 2);
-    h += `<div class="verdict ${good ? "passes" : "no_edge"}" style="margin:10px 0"><b>${esc(tr("d_mm_ht_title", {h: ht.hold_days}))}</b><br>${esc([one("new"), one("add")].filter(Boolean).join("；"))}<br><span class="note">${esc(tr(good ? "d_mm_ht_good" : "d_mm_ht_bad", {d: ht.holdout_start}))}</span></div>`;
+    h += `<div class="verdict ${good ? "passes" : "no_edge"}" style="margin:10px 0"><b>${esc(tr("d_mm_ht_title", {h: ht.hold_days}))}</b><br>${esc([one("new"), one("add")].filter(Boolean).join("；"))}<br><span class="note">${esc(tr(good ? "d_mm_ht_good" : "d_mm_ht_bad", {d: ht.holdout_start}))} ${esc(tr("d_nt_vs_index"))}</span></div>`;
   }
   if (mmCat === "national") h += `<div id="mm-etf"></div>`;
   const inds = MM.industries || [];
@@ -1068,6 +1111,7 @@ async function loadMargin() {
   }
   let q = 0; try { q = (await api("/api/moneyhistory")).quarters || 0; } catch (e) { q = 0; }
   if (q < 8) h += `<h3>${esc(tr("d_mm_hist_title"))}</h3><p class="note">${esc(tr("d_mm_hist_need", {n: q}))} <button class="btn sm" id="mm-hist">${esc(tr("d_mm_hist_btn"))}</button></p>`;
+  else h += await ntResearchHTML();
   box.innerHTML = h;
   const job = (kind) => async () => {
     const x = await api("/api/refresh", {kind});
@@ -1076,6 +1120,26 @@ async function loadMargin() {
   };
   const b1 = $("#margin-update"); if (b1) b1.onclick = job("margin");
   const b2 = $("#mm-hist"); if (b2) b2.onclick = job("moneyhistory");
+  const b3 = $("#nt-run"); if (b3) b3.onclick = job("ntresearch");
+}
+
+async function ntResearchHTML() {
+  let r; try { r = await api(`/api/ntresearch?lang=${S.lang}`); } catch (e) { return ""; }
+  let h = `<h3 id="nt-sec">${esc(tr("d_nt_h"))}</h3>`;
+  if (r.need_run) return h + `<p class="note">${esc(tr("d_nt_need"))} <button class="btn sm primary" id="nt-run">${esc(tr("d_nt_run"))}</button></p>`;
+  h += `<div class="verdict no_edge" style="margin:8px 0"><ul class="pts" style="margin:0">${(r.summary || []).map((x) => `<li>${esc(x)}</li>`).join("")}</ul></div>`;
+  const s = r.signals, act = {new: "d_mm_new", add: "d_mm_add", reduce: "d_mm_reduce", exit: "d_nt_exit"};
+  const label = (k) => (r.kind_labels || {})[k] || k;
+  h += `<details><summary>${esc(tr("d_nt_table", {n: s.n_tests, b: s.bar}))}</summary><table><thead><tr><th>${esc(tr("d_nt_who"))}</th><th>${esc(tr("d_nt_act"))}</th><th>n</th><th>${esc(tr("d_nt_diff"))}</th><th>t</th></tr></thead><tbody>` +
+    s.tests.slice().sort((a, b) => Math.abs(b.t || 0) - Math.abs(a.t || 0)).map((t) => `<tr><td>${esc(label(t.kind))}</td><td>${esc(tr(act[t.action]))}</td><td class="num">${t.n}</td><td>${pctChip(t.diff)}</td><td class="num">${t.t == null ? "—" : t.t.toFixed(2)}${t.passes ? " ✓" : ""}</td></tr>`).join("") +
+    `</tbody></table><p class="note">${esc(tr("d_nt_table_note", {a: s.period[0], b: s.period[1]}))}</p></details>`;
+  const e = r.etf;
+  if (e && e.available) h += `<details><summary>${esc(tr("d_nt_etf", {n: e.rescue.n, m: e.redemption.n}))}</summary><p class="note">${esc(tr("d_nt_etf_ep"))}${esc(e.rescue.episodes.join("、") || "—")}；${esc(tr("d_nt_etf_red"))}${esc(e.redemption.episodes.join("、") || "—")}</p>
+    <p class="note">${esc(tr("d_nt_etf_gap", {a: e.share_days, b: e.trading_days}))} <button class="btn sm" id="nt-run">${esc(tr("d_nt_fill"))}</button></p></details>`;
+  const p = r.predict;
+  if (p && p.latest_picks) h += `<details><summary>${esc(tr("d_nt_pred", {q: p.latest_quarter}))}</summary><table><tbody>${p.latest_picks.slice(0, 12).map((x) => `<tr><td class="tk">${esc(x.ticker)}<small>${esc(x.name || "")}</small></td><td class="num">${Math.round(100 * x.prob)}%</td></tr>`).join("")}</tbody></table>
+    <p class="note">${esc(tr("d_nt_pred_note"))}</p></details>`;
+  return h + `<p class="note">${esc(tr("d_nt_made", {d: r.made}))} ${r.etf && r.etf.available ? "" : `<button class="btn sm" id="nt-run">${esc(tr("d_nt_run"))}</button>`}</p>`;
 }
 
 function recordHTML(r) {
