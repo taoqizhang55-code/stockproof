@@ -57,7 +57,7 @@ def parse(ticker: str) -> dict | None:
     if suffix is None:
         if digits.startswith(("92", "4", "8")):
             suffix = "BJ"
-        elif digits.startswith(("6", "9")):
+        elif digits.startswith(("6", "9", "5")):          # 5xxxxx: Shanghai funds and ETFs (510300, 518880 ...)
             suffix = "SH"
         else:
             suffix = "SZ"

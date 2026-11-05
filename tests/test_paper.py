@@ -128,3 +128,20 @@ def test_forecast_account_rebalances_quarterly(env):
     paper.process(store, str(d), fetch=False)
     assert paper.step_forecast(store, str(d), fid, now=at("2026-03-10"))["rebalance"] is False     # within the quarter
     assert "失效" in paper.account(store, fid)["note"]
+
+
+def test_plan_account_buys_targets_then_waits_a_year(env):
+    d, store, _ = env
+    for code in ("510300", "511010"):
+        _write(d, code + ".SH", np.full(40, 4.0))
+    import stockproof.plan as pl
+    pl.PROFILES["_t"] = {"zh": "测试", "w": {"hs300": 0.6, "bond": 0.4}}
+    pid = paper.create_plan_account(store, str(d), "_t", cash=100_000, start_day="2026-03-02")
+    r = paper.step_plan(store, str(d), pid, now=at("2026-03-02"))
+    assert r["rebalance"] and {t[0] for t in r["trades"]} == {"510300", "511010"}
+    paper.process(store, str(d), fetch=False)
+    s = paper.state(store, str(d), pid)
+    w = {h["ticker"]: h["value"] / s["value"] for h in s["holdings"]}
+    assert abs(w["510300.SH"] - 0.6) < 0.02 and abs(w["511010.SH"] - 0.4) < 0.02
+    assert paper.step_plan(store, str(d), pid, now=at("2026-04-01"))["rebalance"] is False
+    del pl.PROFILES["_t"]

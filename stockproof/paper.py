@@ -516,14 +516,71 @@ def step_forecast(store, data_dir: str, aid: str, now: dt.datetime | None = None
     return {"rebalance": True, "sell": sold, "buy": bought, "target": target}
 
 
+# ---------------------------------------------------------------- long-term plan accounts
+def create_plan_account(store, data_dir: str, profile: str = "balanced", cash: float = 1_000_000.0,
+                        name: str | None = None, lang: str = "zh", start_day: str | None = None) -> str:
+    """A paper account that holds the long-term plan's ETFs at their target weights and rebalances yearly."""
+    from stockproof import plan
+    p = plan.PROFILES[profile]
+    zh = lang == "zh"
+    spec = {"type": "plan", "profile": profile, "weights": {plan.ASSETS[a]["etf"]: w for a, w in p["w"].items()},
+            "rebalance": 252, "market": "cn"}
+    parts = "、".join(f"{plan.ASSETS[a]['etf_name']} {100 * w:.0f}%" for a, w in p["w"].items())
+    note = (f"长期计划（{p['zh']}）：{parts}；每年再平衡" if zh else
+            f"Long-term plan ({profile}): " + ", ".join(f"{plan.ASSETS[a]['etf']} {100 * w:.0f}%" for a, w in p["w"].items())
+            + "; rebalanced yearly")
+    return create_account(store, name or (f"长期计划（{p['zh']}）" if zh else f"Long-term plan ({profile})"), cash, "cn",
+                          "plan", spec, note=note, start_day=start_day)
+
+
+def step_plan(store, data_dir: str, aid: str, now: dt.datetime | None = None, fetch: bool = False) -> dict:
+    """First day: buy every ETF at its target weight. Then once every `rebalance` trading days: sell what is more
+    than 2 points over target and buy what is under."""
+    acct = account(store, aid)
+    spec = acct["spec"]
+    _init(store)
+    today = market_day("600000.SH", now)
+    cal = _calendar(data_dir, "cn", fetch)
+    mk = store.conn.execute("SELECT day FROM paper_marks WHERE account=? AND kind='rebalance' ORDER BY day DESC LIMIT 1",
+                            (aid,)).fetchone()
+    if mk and int(((cal > pd.Timestamp(mk[0])) & (cal <= pd.Timestamp(today))).sum()) < spec["rebalance"]:
+        return {"rebalance": False}
+    od = orders(store, aid)
+    if len(od) and od["status"].isna().any():
+        return {"rebalance": False, "waiting": int(od["status"].isna().sum())}
+    s = state(store, data_dir, aid)
+    tot = s["value"]
+    held = {h["ticker"][:6]: h for h in s["holdings"]}
+    key = f"rebalance:{today}"
+    trades = []
+    for code, w in spec["weights"].items():                       # sells first, so their cash funds the buys
+        h = held.get(code)
+        if h and h.get("price"):
+            over = (h["value"] or 0) - tot * w
+            if over > 0.02 * tot:
+                n = int(over / h["price"] // 100 * 100)
+                if n:
+                    place(store, aid, h["ticker"], "sell", shares=n, source=key, note="above target weight", now=now)
+                    trades.append((code, "sell", n))
+    for code, w in spec["weights"].items():
+        h = held.get(code)
+        under = tot * w - ((h or {}).get("value") or 0)
+        if under > 0.02 * tot or not h:
+            place(store, aid, cn.canonical(code), "buy", value=under, source=key, note="below target weight", now=now)
+            trades.append((code, "buy", round(under)))
+    store.conn.execute("INSERT INTO paper_marks VALUES (?,?,?,?)", (aid, today, "rebalance", json.dumps(trades)))
+    store.conn.commit()
+    return {"rebalance": True, "trades": trades}
+
+
 def run_all(store, data_dir: str, fetch: bool = True, log=print) -> dict:
     """The daily job: queue strategy orders, then fill whatever can be filled."""
     _init(store)
     queued = {}
     for a in accounts(store):
-        if a["kind"] in ("strategy", "forecast"):
+        if a["kind"] in ("strategy", "forecast", "plan"):
             try:
-                queued[a["id"]] = (step_strategy if a["kind"] == "strategy" else step_forecast)(
+                queued[a["id"]] = {"strategy": step_strategy, "forecast": step_forecast, "plan": step_plan}[a["kind"]](
                     store, data_dir, a["id"], fetch=fetch)
             except Exception as e:
                 queued[a["id"]] = {"error": str(e)[:200]}

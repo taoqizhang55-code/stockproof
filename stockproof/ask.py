@@ -28,6 +28,7 @@ INTENTS = {
     "technical": ("stocks", "K 线和支撑阻力", "chart, support and resistance"),
     "smart_money": ("money", "谁在持有这只股票", "who holds this stock"),
     "nt_research": ("money", "跟着国家队做能不能赚钱", "can acting on the national team make money"),
+    "plan": ("plan", "长期投资计划", "long-term plan"),
     "forecast": ("stocks", "未来几个月的走势预测", "medium/long-horizon forecast"),
     "moneymap": ("money", "国家队 / 社保 / 北向在买什么", "what the national team / pensions / northbound bought"),
     "etf": ("money", "国家队 ETF 托底迹象", "national-team ETF buying"),
@@ -58,6 +59,7 @@ RULES = [   # (intent, pattern, needs a stock)
     ("margin", r"融资|杠杆|两融|margin", False),
     ("smart_money", r"股东|主力|龙虎榜|谁(在)?(买|持有)|who holds", True),
     ("nt_research", r"(跟着|反着|根据|观察).{0,8}(国家队|社保|险资|北向).{0,12}(赚|买|做)|(国家队|社保).{0,10}(赚钱|赚翻)|预测.{0,10}(国家队|社保)|下(个)?季度.{0,10}(国家队|社保)", False),
+    ("plan", r"定投|长期投资|资产配置|怎么投资|每月.{0,8}(投|存)|股债|再平衡|养老|long[- ]term plan|dca", False),
     ("forecast", r"未来.{0,6}(\d+|几|三|六|半)?.{0,2}(个月|月|年)|长期(走势|会)|中长期|(半年|一年)后|forecast|next (quarter|year|\d+ months)", True),
     ("moneymap", "|".join(CATEGORIES), False),
     ("why", r"为什么.{0,4}(涨|跌|大涨|大跌|暴涨|暴跌)|为啥.{0,4}(涨|跌)|why .*(move|drop|fall|rise|up|down|jump)", True),
@@ -189,6 +191,8 @@ def cli_argv(r: dict) -> list[str] | None:
         return ["team", "--record"]
     if i == "moneymap":
         return ["moneymap", "--category", a.get("category", "national")]
+    if i == "plan":
+        return ["plan"]
     if i == "forecast":
         return ["forecast", tk]
     if i == "nt_research":

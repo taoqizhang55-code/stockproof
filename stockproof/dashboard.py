@@ -283,6 +283,12 @@ class Dashboard:
             aid = paper.create_strategy_account(store, self.data_dir, spec, float(body.get("cash") or 1_000_000),
                                                 body.get("name"), self.settings["lang"])
             return {"id": aid}
+        if act == "plan":
+            prof = str(body.get("profile") or "balanced")
+            aid = paper.create_plan_account(store, self.data_dir, prof, float(body.get("cash") or 1_000_000),
+                                            body.get("name"), self.settings["lang"])
+            paper.step_plan(store, self.data_dir, aid)
+            return {"id": aid}
         if act == "forecast":
             aid = paper.create_forecast_account(store, self.data_dir, str(body.get("horizon") or "6m"),
                                                 int(body.get("n") or 50), float(body.get("cash") or 1_000_000),
@@ -832,6 +838,31 @@ def make_handler(app: Dashboard, port: int):
                     store = app._store()
                     team.score_calls(store, app.data_dir, fetch=False)
                     return self._send(200, _clean(team.track_record(store, self._lang(qs), limit=30)))
+                if url.path == "/api/plan":
+                    from stockproof import plan
+                    lang = self._lang(qs)
+                    prof = (qs.get("profile") or ["balanced"])[0]
+                    if prof not in plan.PROFILES:
+                        prof = "balanced"
+                    try:
+                        amount = max(0.0, min(1e8, float((qs.get("amount") or ["3000"])[0])))
+                    except ValueError:
+                        amount = 3000.0
+                    hold = {}
+                    for a in plan.ASSETS:
+                        try:
+                            v = float((qs.get("h_" + a) or ["0"])[0] or 0)
+                        except ValueError:
+                            v = 0
+                        if v > 0:
+                            hold[a] = v
+                    try:
+                        hist = plan.history(app.data_dir, fetch=not app.demo)
+                        month = plan.this_month(app.data_dir, prof, amount, hold, fetch=not app.demo, lang=lang)
+                    except Exception as e:
+                        return self._send(200, {"error": f"{type(e).__name__}: {str(e)[:160]}"})
+                    return self._send(200, _clean({"history": hist, "summary": plan.summary_text(hist, lang),
+                                                   "month": month, "assets": plan.ASSETS, "starts": plan.STARTS}))
                 if url.path == "/api/forecast":
                     from stockproof import forecast as fc
                     res = fc.load(app.data_dir)

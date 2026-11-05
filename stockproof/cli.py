@@ -749,6 +749,34 @@ def cmd_forecast(args) -> int:
     return 0
 
 
+def cmd_plan(args) -> int:
+    """Long-term plan: A-shares, bonds, gold, US stocks; buy monthly with a valuation tilt; rebalance yearly."""
+    from stockproof import plan
+    zh = args.lang == "zh"
+    h = plan.history(args.data_dir)
+    print(("各种配置的历史成绩（" if zh else "History of each mix (") + f"2005-01 – {h['through']}）")
+    for line in plan.summary_text(h, args.lang):
+        print("  · " + line)
+    holdings = {}
+    for part in (args.holdings or "").replace("，", ",").split(","):
+        if ":" in part:
+            code, v = part.split(":", 1)
+            code = code.strip()[:6]
+            asset = next((a for a, x in plan.ASSETS.items() if x["etf"] == code or a == code.strip()), None)
+            if asset:
+                holdings[asset] = float(v)
+    m = plan.this_month(args.data_dir, args.profile, args.monthly, holdings, lang=args.lang)
+    print()
+    print((f"这个月（{m['as_of']}）的{m['profile_name']}计划，投入 {args.monthly:,.0f}：" if zh else
+           f"This month ({m['as_of']}), {args.profile}, {args.monthly:,.0f}:"))
+    for r in m["rows"]:
+        print(f"  {r['etf']} {r['etf_name']:14s} 目标 {100 * r['target']:4.1f}%  买 {r['buy']:>10,.0f}"
+              + (f"  现在 {100 * r['now_weight']:.1f}%" if r["now_weight"] is not None else ""))
+    print("  " + m["note"])
+    print("  " + m["caveats"])
+    return 0
+
+
 def cmd_paper(args) -> int:
     """Paper trading: accounts, orders filled at later opens with pessimistic rules, NAV vs the market."""
     import json as _json
@@ -774,6 +802,13 @@ def cmd_paper(args) -> int:
         print(("已建策略模拟账户 " if zh else "Strategy paper account ") + f"{aid}: {paper.account(store, aid)['note']}")
         print("  " + ("从今天起，每天 `stockproof paper run` 按策略下单（daily 会自动跑）。" if zh else
                       "From today on, `stockproof paper run` (also part of daily) places its orders."))
+        return 0
+    if a == "plan":
+        aid = paper.create_plan_account(store, args.data_dir, args.profile, args.cash, args.name, args.lang)
+        r = paper.step_plan(store, args.data_dir, aid)
+        print(("已建长期计划模拟账户 " if zh else "Plan paper account ") + f"{aid}: {paper.account(store, aid)['note']}")
+        print("  " + (f"已下 {len(r.get('trades', []))} 笔买单；之后每年自动再平衡。" if zh else
+                      f"{len(r.get('trades', []))} orders queued; rebalances yearly."))
         return 0
     if a == "forecast":
         aid = paper.create_forecast_account(store, args.data_dir, args.horizon, args.n, args.cash, args.name, args.lang)
@@ -1528,6 +1563,14 @@ def build_parser() -> argparse.ArgumentParser:
     ak.add_argument("--base-url")
     ak.set_defaults(func=cmd_ask)
 
+    pl = sub.add_parser("plan", help="long-term plan: A-shares + bonds + gold + US, monthly buying, yearly rebalance")
+    pl.add_argument("--profile", default="balanced", choices=["conservative", "balanced", "growth", "a_only"])
+    pl.add_argument("--monthly", type=float, default=3000.0, help="how much you invest each month")
+    pl.add_argument("--holdings", help='what you hold now, by ETF code: "510300:20000,511010:30000"')
+    pl.add_argument("--lang", default="zh", choices=["en", "zh"])
+    pl.add_argument("--data-dir", default=DATA_DIR)
+    pl.set_defaults(func=cmd_plan)
+
     fo = sub.add_parser("forecast", help="3/6/12-month forecasts vs the average stock, with the model's track record")
     fo.add_argument("tickers", nargs="*")
     fo.add_argument("--download", action="store_true", help="first download whole-market A-share prices (30-60 min)")
@@ -1555,7 +1598,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     pp = sub.add_parser("paper", help="paper trading: pessimistic fills, append-only record, NAV vs the market (no real orders)")
     pp.add_argument("action", nargs="?", default="list",
-                    choices=["list", "new", "strategy", "forecast", "buy", "sell", "run", "show", "gap", "from-team"])
+                    choices=["list", "new", "strategy", "forecast", "plan", "buy", "sell", "run", "show", "gap", "from-team"])
     pp.add_argument("account", nargs="?", help="account id or name (buy / sell / show / gap / from-team)")
     pp.add_argument("ticker", nargs="?", help="stock (buy / sell)")
     pp.add_argument("--shares", type=int)
@@ -1568,6 +1611,7 @@ def build_parser() -> argparse.ArgumentParser:
     pp.add_argument("--call", help="from-team: the team call's log id")
     pp.add_argument("--horizon", default="6m", choices=["3m", "6m", "12m"], help="forecast: which forecast to follow")
     pp.add_argument("--n", type=int, default=50, help="forecast: how many top stocks to hold")
+    pp.add_argument("--profile", default="balanced", choices=["conservative", "balanced", "growth"], help="plan: which mix")
     pp.add_argument("--note")
     pp.add_argument("--lang", default="zh", choices=["en", "zh"])
     pp.add_argument("--data-dir", default=DATA_DIR)
@@ -1681,6 +1725,8 @@ MENU = {
                     ("daily", "更新关注列表并生成每日简报"),
                     ("calendar", "未来两周谁发财报"),
                     ("schedule --time 21:00", "每晚自动更新（Mac / Windows / Linux）")]),
+        ("长期投资计划", [("plan --monthly 3000", "股票、国债、黄金、美股分散配置：每月该买什么、A 股便宜多投贵了少投、每年再平衡，附 20 年历史成绩"),
+                      ("paper plan --profile balanced", "按长期计划建一个模拟账户，和选股方法对比")]),
         ("中长期预测", [("forecast 600519", "未来 3/6/12 个月相对大盘的预测，附模型过去的真实成绩（是否通过检验）"),
                      ("forecast --download", "先下载全市场价格，让预测和检验覆盖全部 A 股")]),
         ("跟着国家队做", [("moneymap --research", "检验：跟着/反着国家队、社保、险资的披露做能不能赚钱；ETF 托底；预测下季度新进")]),

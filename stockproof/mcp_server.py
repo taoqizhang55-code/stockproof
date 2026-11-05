@@ -43,6 +43,7 @@ How to use it well:
 - "分析一下 X" / "X 能买吗" / "give me a view on X" -> research_team; pass what the user wants discussed as `question`
   in their words (e.g. "重点看扣非亏损会不会持续") (a cited multi-analyst view, logged and
   scored later; never present it as advice or an order). "How accurate is the team?" -> team_track_record.
+- "长期怎么投、定投、资产配置、每月存多少钱怎么投" -> long_term_plan.
 - "未来几个月/半年/一年会涨吗、长期走势" -> long_term_forecast (3/6/12-month rank with its track record; say if the
   model failed its test). Never forecast tomorrow's direction.
 - "跟着国家队买能赚钱吗 / 预测国家队下季度买什么" -> national_team_research (not money_map).
@@ -447,6 +448,11 @@ class Tools:
             if action == "new":
                 aid = paper.create_account(store, name or ("模拟盘" if zh else "paper"), cash or 1_000_000)
                 return {"id": aid, "rules": rules}
+            if action == "plan":
+                aid = paper.create_plan_account(store, self.app.data_dir, name if name in ("conservative", "balanced", "growth") else "balanced",
+                                                cash or 1_000_000, None, self._lang(lang))
+                paper.step_plan(store, self.app.data_dir, aid)
+                return {"id": aid, "account": paper.account(store, aid), "rules": rules}
             if action == "forecast":
                 aid = paper.create_forecast_account(store, self.app.data_dir, "6m", 50, cash or 1_000_000, name, self._lang(lang))
                 paper.step_forecast(store, self.app.data_dir, aid)
@@ -502,7 +508,7 @@ class Tools:
                             + (" 持续盯盘：在终端运行 stockproof alerts --watch。" if lang == "zh" else
                                " For continuous watching run `stockproof alerts --watch`.")})
 
-    TOOL_FOR = {"forecast": "long_term_forecast", "nt_research": "national_team_research", "day": "day_detail", "team": "research_team", "team_record": "team_track_record", "why": "why_did_it_move",
+    TOOL_FOR = {"plan": "long_term_plan", "forecast": "long_term_forecast", "nt_research": "national_team_research", "day": "day_detail", "team": "research_team", "team_record": "team_track_record", "why": "why_did_it_move",
                 "technical": "technical_analysis", "smart_money": "smart_money", "moneymap": "money_map",
                 "etf": "national_team_etf", "margin": "market_leverage", "breakouts": "scan_market",
                 "compare": "compare_with_last_report", "calendar": "earnings_calendar", "digest": "daily_digest",
@@ -525,6 +531,24 @@ class Tools:
                             "howto": "Call next_tool with next_args now (for paper_order, the account defaults to the latest "
                                      "manual paper account: call paper_trading(action='list') first if unsure). If the "
                                      "intent looks wrong for what the user said, pick the right tool yourself."})
+
+    def long_term_plan(self, profile: str = "balanced", monthly_amount: float = 3000.0, holdings: dict | None = None,
+                       lang: str | None = None) -> dict:
+        from stockproof import plan
+        lang = self._lang(lang)
+        if profile not in plan.PROFILES:
+            profile = "balanced"
+        try:
+            h = plan.history(self.app.data_dir)
+            hold = {a: float(v) for a, v in (holdings or {}).items() if a in plan.ASSETS}
+            m = plan.this_month(self.app.data_dir, profile, float(monthly_amount), hold, lang=lang)
+        except Exception as e:
+            return {"error": f"{type(e).__name__}: {str(e)[:200]}"}
+        for p in h["profiles"].values():
+            p.pop("lump_path", None)
+        return self._clean({"history": h, "summary": plan.summary_text(h, lang), "this_month": m,
+                            "note": "Lead with the history (including buying at the 2007/2015 tops) and this month's buys. "
+                                    "Mention the caveats. Paper account: paper_trading(action='plan'). Not advice."})
 
     def long_term_forecast(self, ticker: str | None = None, refresh: bool = False, lang: str | None = None) -> dict:
         from stockproof import forecast as fc
@@ -629,6 +653,7 @@ class Tools:
                         ["茅台能买吗？", "科大讯飞 10 月 15 号那天发生了什么？", "把刚才投研团队的结论做成分享卡片"]),
                       g("模拟盘与提醒", ["paper_trading", "price_alerts"],
                         ["建一个模拟盘，用 10 万模拟买入贵州茅台", "我的模拟盘跑赢沪深300 了吗？", "我的股票有没有突破或到达计划价位？"]),
+                      g("长期投资计划", ["long_term_plan"], ["每月 3000 元怎么长期投资？", "定投沪深300 划算吗？", "我的股债比例要不要再平衡？"]),
                       g("中长期预测", ["long_term_forecast"], ["贵州茅台未来半年会跑赢大盘吗？", "这个预测模型过去准不准？", "预测科大讯飞未来一年"]),
                       g("资金地图", ["national_team_research", "money_map", "national_team_etf", "market_leverage", "smart_money"],
                         ["国家队这个季度买了什么？", "最近有没有国家队托底的迹象？", "杠杆资金最近在加仓还是撤退？", "社保基金加仓了哪些行业？", "科大讯飞的十大股东里有没有国家队？"]),
@@ -651,6 +676,7 @@ class Tools:
                         ["Should I buy NVDA?", "Make a share card of the team's view", "Make a card of my paper account"]),
                       g("Paper trading & alerts", ["paper_trading", "price_alerts"],
                         ["Open a paper account and buy 10k of NVDA", "Is my paper account beating the index?", "Any alerts on my stocks?"]),
+                      g("Long-term plan", ["long_term_plan"], ["How should I invest 3000 a month?", "Is dollar-cost averaging CSI 300 worth it?", "Should I rebalance?"]),
                       g("Forecasts", ["long_term_forecast"], ["Will Moutai beat the market over 6 months?", "Is the forecast model any good?", "Forecast 002230 for a year"]),
                       g("Smart money", ["national_team_research", "money_map", "national_team_etf", "market_leverage", "smart_money"],
                         ["What did the national team buy this quarter?", "Who holds 002230 among the big funds?"]),
@@ -738,7 +764,7 @@ Type `/stockproof` for ready-made requests.
 Information and research, not investment advice."""
 
     # ---------------------------------------------------------------- dashboard
-    TABS = ("home", "stocks", "digest", "team", "screen", "money", "paper", "lab", "portfolio", "research")
+    TABS = ("home", "stocks", "digest", "team", "screen", "money", "plan", "paper", "lab", "portfolio", "research")
 
     def _dashboard_state(self, port: int) -> dict | None:
         import json as _json
@@ -770,7 +796,7 @@ Information and research, not investment advice."""
             time.sleep(0.2)
         return True
 
-    TOOL_TAB = {"paper_trading": "paper", "price_alerts": "paper", "research_team": "team", "team_track_record": "team", "money_map": "money", "smart_money": "money", "portfolio_checkup": "portfolio", "screen_stocks": "screen", "evidence_scorecard": "screen",
+    TOOL_TAB = {"long_term_plan": "plan", "paper_trading": "paper", "price_alerts": "paper", "research_team": "team", "team_track_record": "team", "money_map": "money", "smart_money": "money", "portfolio_checkup": "portfolio", "screen_stocks": "screen", "evidence_scorecard": "screen",
                 "daily_digest": "digest", "research_findings": "research", "watchlist": "stocks",
                 "stock_brief": "stocks", "why_did_it_move": "stocks", "compare_with_last_report": "stocks",
                 "company_announcements": "stocks", "refresh_stock": "stocks"}
@@ -965,6 +991,9 @@ PROMPTS = [
     ("team", "AI 投研团队：分析一只股票", "Five AI analysts, a bull/bear debate and a PM's view, logged and scored later", "ticker",
      "用 research_team 让 AI 投研团队分析 {x}：先说结论（观点、置信度、观察期）、观察计划和风险，说明置信度为什么是这个水平，"
      "引用证据编号；说明这次判断已记入前瞻日志、到期会打分。不是买卖建议。"),
+    ("plan", "长期投资计划：每月怎么投", "Long-term plan: what to buy each month", "amount",
+     "用 long_term_plan 给我一个长期投资计划（每月投入 {x}）：先给出稳健/平衡/进取三种配置 2005 年以来的历史成绩（包括在 2007、2015 年最高点买入的结果、最差一年、最大回撤），"
+     "再给出这个月每个 ETF 该买多少、A 股现在便宜还是贵。说明简化和风险，不是投资建议。"),
     ("forecast", "中长期预测：未来 3/6/12 个月", "3/6/12-month forecast with the model's track record", "ticker",
      "用 long_term_forecast 预测 {x} 未来 3、6、12 个月相对大盘的表现：说出排名百分位、历史同档的平均超额收益，"
      "以及这个模型有没有通过检验（扣成本后的真实成绩）；没通过就明说只能参考。不预测明天涨跌，不是投资建议。"),
@@ -1003,7 +1032,7 @@ PROMPTS = [
 ]
 ARG_ZH = {"ticker": "股票代码", "holdings": "持仓（代码 股数，比如 600519 100, AAPL 50；也可以发券商截图）",
           "idea": "交易想法（用大白话写）", "conditions": "条件（可不写）", "question": "一句话的问题（比如：茅台能买吗）",
-          "what": "要做成卡片的内容（比如：刚才的投研团队结论、我的模拟盘、某个实验）"}
+          "what": "要做成卡片的内容（比如：刚才的投研团队结论、我的模拟盘、某个实验）", "amount": "每月投入多少钱（比如：3000）"}
 SKILL_MARK = ".stockproof-skill"
 
 
@@ -1261,6 +1290,16 @@ def build_server(tools: Tools):
         to the right stockproof tool and its arguments (rules first, LLM only if no rule fits). Returns next_tool and
         next_args; call that tool next. Use when unsure which tool fits."""
         return tools.ask(text, lang)
+
+    @srv.tool()
+    def long_term_plan(profile: str = "balanced", monthly_amount: float = 3000.0, holdings: dict | None = None,
+                       lang: str | None = None) -> dict:
+        """Long-term investment plan (长期投资/定投/资产配置): A-shares (CSI 300/500 ETFs), government bonds, gold and
+        S&P 500, profiles conservative / balanced / growth. Returns each mix's history since 2005 from several start
+        dates (incl. the 2007 and 2015 tops), worst year, max drawdown, monthly-buying returns with and without the
+        valuation tilt, and this month's buys (A-share part scaled by how cheap A-shares are; rebalance warning
+        from `holdings` = {asset: amount}, assets hs300/zz500/bond/gold/spx). No forecasting; not advice."""
+        return tools.long_term_plan(profile, monthly_amount, holdings, lang)
 
     @srv.tool()
     def long_term_forecast(ticker: str | None = None, refresh: bool = False, lang: str | None = None) -> dict:
