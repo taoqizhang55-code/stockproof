@@ -173,7 +173,9 @@ def walk_forward(F: dict, px: pd.DataFrame, horizon: int, holdout: pd.Timestamp 
         if i + horizon >= len(px):
             return None
         r = px.iloc[i + horizon] / px.iloc[i] - 1
-        return r - (cum.iloc[i + horizon] / cum.iloc[i] - 1)
+        # vs buying every stock on day d and holding: a daily-rebalanced average would credit untradable
+        # IPO limit-up streaks and bid-ask bounce (about +3%/yr on the whole market)
+        return r - r.mean()
 
     rows = {}
     for d in dates:
