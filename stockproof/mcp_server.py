@@ -447,6 +447,11 @@ class Tools:
             if action == "new":
                 aid = paper.create_account(store, name or ("模拟盘" if zh else "paper"), cash or 1_000_000)
                 return {"id": aid, "rules": rules}
+            if action == "forecast":
+                aid = paper.create_forecast_account(store, self.app.data_dir, "6m", 50, cash or 1_000_000, name, self._lang(lang))
+                paper.step_forecast(store, self.app.data_dir, aid)
+                return {"id": aid, "account": paper.account(store, aid), "rules": rules,
+                        "howto": "Holds the 6-month forecast's top 50, rebalanced quarterly; buys fill at the next open."}
             if action == "strategy":
                 if not experiment_id:
                     return {"error": "give experiment_id (from lab_backtest / lab_experiments)"}
@@ -531,7 +536,7 @@ class Tools:
                 return {"error": f"{type(e).__name__}: {str(e)[:200]}"}
         lang = self._lang(lang)
         out = {"made": res["made"], "universe": res.get("universe"), "track_record": fc.summary_text(res, lang),
-               "horizons": {k: {"passes": v.get("passes"), "explore": v.get("explore"), "holdout": v.get("holdout"),
+               "horizons": {k: {"passes": v.get("passes"), "status": v.get("status"), "explore": v.get("explore"), "holdout": v.get("holdout"),
                                 "weights": v.get("weights")} for k, v in res["horizons"].items()},
                "note": "Forecast = rank vs all stocks over 3/6/12 months and the past average excess of that tenth. Say "
                        "whether the model passed its walk-forward test (most don't); never present a failed model as a "
@@ -1234,7 +1239,8 @@ def build_server(tools: Tools):
                       lang: str | None = None) -> dict:
         """Paper trading (模拟盘), never real money. action: list (accounts vs the index), show (one account: holdings,
         orders, daily value vs CSI 300 / S&P 500), new (name, cash), buy / sell (account, ticker, shares or value),
-        run (fill pending orders and queue strategy orders), strategy (experiment_id from the lab: follow that
+        run (fill pending orders and queue strategy orders), forecast (hold the 6-month forecast's top 50, rebalanced
+        quarterly: tests the forecaster live), strategy (experiment_id from the lab: follow that
         strategy on paper from today), gap (a strategy account: backtest rule vs actual paper fills, trade by trade),
         from_team (call_id of a research-team call -> one paper order). Orders fill at the next trading day's open
         with pessimistic rules: no buy at limit-up / sell at limit-down (waits up to 5 days), max 5% of the day's

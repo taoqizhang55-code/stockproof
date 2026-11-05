@@ -311,6 +311,15 @@ def daily(data_dir: str, provider: str, model: str | None, base_url: str | None,
     except Exception as e:
         results["market_data"] = {"done": 0, "error": None, "warning": f"{type(e).__name__}: {e}"}
         print(f"market data skipped: {type(e).__name__}: {str(e)[:120]}", flush=True)
+    try:                                     # monthly: extend whole-market prices and refit the forecaster
+        from stockproof import forecast as fc
+        fr = fc.load(data_dir)
+        if fr and (dt.date.today() - dt.date.fromisoformat(fr["made"])).days >= 28:
+            fc.update_prices(data_dir, log=lambda *a: None)
+            fc.run(data_dir, log=lambda *a: None)
+            print("forecast: refit", flush=True)
+    except Exception as e:
+        print(f"forecast refit skipped: {type(e).__name__}: {e}", flush=True)
     try:                                     # paper trading: strategy orders, fills; then alerts
         from stockproof import alerts, paper
         st = app._store()

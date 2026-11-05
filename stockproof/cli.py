@@ -719,9 +719,12 @@ def cmd_forecast(args) -> int:
     from stockproof import forecast as fc
     zh = args.lang == "zh"
     if args.download:
+        if args.since < "2015":
+            print((f"先补 {args.since} 年以来的业绩报表（每期约 2 秒）……" if zh else f"Filling 业绩报表 since {args.since} ..."))
+            fc.download_reports(args.data_dir, args.since, log=print)
         print("下载全市场 A 股历史价格（雅虎财经，分批、可中断续传；第一次约 30–60 分钟）……" if zh else
               "Downloading whole-market A-share prices (Yahoo, resumable batches; 30-60 min the first time) ...")
-        r = fc.download_prices(args.data_dir, log=print)
+        r = fc.download_prices(args.data_dir, start=f"{args.since}-01-01", log=print)
         print(("完成：" if zh else "Done: ") + json.dumps(r, ensure_ascii=False))
     res = fc.load(args.data_dir)
     if res is None or args.refresh or args.download:
@@ -771,6 +774,13 @@ def cmd_paper(args) -> int:
         print(("已建策略模拟账户 " if zh else "Strategy paper account ") + f"{aid}: {paper.account(store, aid)['note']}")
         print("  " + ("从今天起，每天 `stockproof paper run` 按策略下单（daily 会自动跑）。" if zh else
                       "From today on, `stockproof paper run` (also part of daily) places its orders."))
+        return 0
+    if a == "forecast":
+        aid = paper.create_forecast_account(store, args.data_dir, args.horizon, args.n, args.cash, args.name, args.lang)
+        print(("已建预测模拟账户 " if zh else "Forecast paper account ") + f"{aid}: {paper.account(store, aid)['note']}")
+        r = paper.step_forecast(store, args.data_dir, aid)
+        print("  " + (f"已下 {r.get('buy', 0)} 笔买单，下一个交易日开盘按悲观规则成交；之后每个季度自动调仓（daily 里会跑）。" if zh else
+                      f"{r.get('buy', 0)} buy orders queued for the next open; rebalances quarterly (part of daily)."))
         return 0
     if a in ("buy", "sell"):
         x = acct(args.account)
@@ -1522,6 +1532,7 @@ def build_parser() -> argparse.ArgumentParser:
     fo.add_argument("tickers", nargs="*")
     fo.add_argument("--download", action="store_true", help="first download whole-market A-share prices (30-60 min)")
     fo.add_argument("--refresh", action="store_true", help="refit and retest")
+    fo.add_argument("--since", default="2015", help="--download: first year (2005 for 20 years incl. 2007-08 and 2015)")
     fo.add_argument("--lang", default="zh", choices=["en", "zh"])
     fo.add_argument("--data-dir", default=DATA_DIR)
     fo.set_defaults(func=cmd_forecast)
@@ -1544,7 +1555,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     pp = sub.add_parser("paper", help="paper trading: pessimistic fills, append-only record, NAV vs the market (no real orders)")
     pp.add_argument("action", nargs="?", default="list",
-                    choices=["list", "new", "strategy", "buy", "sell", "run", "show", "gap", "from-team"])
+                    choices=["list", "new", "strategy", "forecast", "buy", "sell", "run", "show", "gap", "from-team"])
     pp.add_argument("account", nargs="?", help="account id or name (buy / sell / show / gap / from-team)")
     pp.add_argument("ticker", nargs="?", help="stock (buy / sell)")
     pp.add_argument("--shares", type=int)
@@ -1555,6 +1566,8 @@ def build_parser() -> argparse.ArgumentParser:
     pp.add_argument("--spec", help="strategy: a lab spec JSON (earnings / forecast / smart_money)")
     pp.add_argument("--exp", help="strategy: a lab experiment id")
     pp.add_argument("--call", help="from-team: the team call's log id")
+    pp.add_argument("--horizon", default="6m", choices=["3m", "6m", "12m"], help="forecast: which forecast to follow")
+    pp.add_argument("--n", type=int, default=50, help="forecast: how many top stocks to hold")
     pp.add_argument("--note")
     pp.add_argument("--lang", default="zh", choices=["en", "zh"])
     pp.add_argument("--data-dir", default=DATA_DIR)
@@ -1681,6 +1694,7 @@ MENU = {
         ("模拟盘与提醒", [("paper new --name 我的模拟盘", "模拟盘：下一个交易日开盘成交、涨跌停不成交，记录不能改"),
                       ("paper buy 我的模拟盘 600519 --value 100000", "下一笔模拟单（不是实盘委托）"),
                       ("paper strategy --exp <实验id>", "让实验室里的策略从今天起跑模拟盘，看回测和实盘的差距"),
+                      ("paper forecast --horizon 6m --n 50", "按中长期预测持有前 50 只、每季度调仓的模拟账户"),
                       ("alerts --watch", "盯盘：突破/跌破区间、到达投研团队的计划价位、模拟单成交")]),
         ("研究与量化实验室", [("research --market cn", "财报事件研究和扣费回测"),
                         ("policy", "新闻联播政策信号研究"),

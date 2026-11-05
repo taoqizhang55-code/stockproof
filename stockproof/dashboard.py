@@ -283,6 +283,12 @@ class Dashboard:
             aid = paper.create_strategy_account(store, self.data_dir, spec, float(body.get("cash") or 1_000_000),
                                                 body.get("name"), self.settings["lang"])
             return {"id": aid}
+        if act == "forecast":
+            aid = paper.create_forecast_account(store, self.data_dir, str(body.get("horizon") or "6m"),
+                                                int(body.get("n") or 50), float(body.get("cash") or 1_000_000),
+                                                body.get("name"), self.settings["lang"])
+            paper.step_forecast(store, self.data_dir, aid)
+            return {"id": aid}
         if act in ("buy", "sell"):
             tk = str(body.get("ticker", "")).strip()
             tk = cn.canonical(tk) if cn.is_cn(tk) else tk.upper()

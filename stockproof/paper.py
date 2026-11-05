@@ -42,7 +42,8 @@ CREATE TABLE IF NOT EXISTS paper_fills (
     order_id TEXT PRIMARY KEY, day TEXT, status TEXT, price REAL, shares INTEGER, gross REAL, cost REAL,
     reason TEXT, recorded_at TEXT);
 """
-for _t in ("paper_accounts", "paper_orders", "paper_fills"):
+SCHEMA += "CREATE TABLE IF NOT EXISTS paper_marks (account TEXT, day TEXT, kind TEXT, detail TEXT);\n"
+for _t in ("paper_accounts", "paper_orders", "paper_fills", "paper_marks"):
     SCHEMA += (f"CREATE TRIGGER IF NOT EXISTS {_t}_no_update BEFORE UPDATE ON {_t} "
                f"BEGIN SELECT RAISE(ABORT, 'paper records are append-only'); END;\n"
                f"CREATE TRIGGER IF NOT EXISTS {_t}_no_delete BEFORE DELETE ON {_t} "
@@ -450,14 +451,80 @@ def from_team_call(store, aid: str, call: dict, value: float, now: dt.datetime |
     return None
 
 
+# ---------------------------------------------------------------- forecast model portfolios
+def create_forecast_account(store, data_dir: str, horizon: str = "6m", n: int = 50, cash: float = 1_000_000.0,
+                            name: str | None = None, lang: str = "zh") -> str:
+    """A paper account that holds the forecaster's top `n` stocks, equal weight, and rebalances every
+    `rebalance` trading days (63 = a quarter). Its record shows whether the model works from today on."""
+    from stockproof import forecast as fc
+    res = fc.load(data_dir)
+    if res is None or horizon not in res.get("horizons", {}):
+        raise ValueError("no forecast yet: run `stockproof forecast` first")
+    r = res["horizons"][horizon]
+    zh = lang == "zh"
+    spec = {"type": "forecast", "horizon": horizon, "n": int(n), "rebalance": 63, "market": "cn",
+            "status_at_start": r.get("status"), "backtest_net_per_year": (r.get("explore") or {}).get("net_per_year")}
+    hz = {"3m": "3 个月", "6m": "6 个月", "12m": "12 个月"}.get(horizon, horizon)
+    note = (f"中长期预测（{hz}）排名前 {n} 只，等权，每季度调仓；开户时模型状态：{fc.STATUS_ZH.get(r.get('status'), '')}" if zh else
+            f"Forecaster ({horizon}) top {n}, equal weight, rebalanced quarterly; model at start: {fc.STATUS_EN.get(r.get('status'), '')}")
+    return create_account(store, name or (f"预测前{n}（{hz}）" if zh else f"Forecast top {n} ({horizon})"), cash, "cn",
+                          "forecast", spec, note=note)
+
+
+def step_forecast(store, data_dir: str, aid: str, now: dt.datetime | None = None, fetch: bool = False,
+                  scores: dict | None = None) -> dict:
+    """On the first day and then every `rebalance` trading days: sell holdings that left the top `n`, buy the
+    new ones for an equal share of the account's value. Uses the latest saved forecast (refit monthly)."""
+    from stockproof import forecast as fc
+    acct = account(store, aid)
+    spec = acct["spec"]
+    od = orders(store, aid)
+    today = market_day("600000.SH", now)
+    cal = _calendar(data_dir, "cn", fetch)
+    _init(store)
+    marks = store.conn.execute("SELECT day FROM paper_marks WHERE account=? AND kind='rebalance' ORDER BY day DESC LIMIT 1",
+                               (aid,)).fetchone()
+    if marks:
+        last = pd.Timestamp(marks[0])
+        if int(((cal > last) & (cal <= pd.Timestamp(today))).sum()) < spec["rebalance"]:
+            return {"rebalance": False}
+    if od["status"].isna().any():
+        return {"rebalance": False, "waiting": int(od["status"].isna().sum())}
+    if scores is None:
+        res = fc.load(data_dir) or {}
+        st = (res.get("horizons", {}).get(spec["horizon"]) or {}).get("stocks") or {}
+        scores = {tk: v["pct"] for tk, v in st.items()}
+    if not scores:
+        return {"error": "no forecast scores"}
+    target = [tk for tk, _ in sorted(scores.items(), key=lambda kv: -kv[1])[:spec["n"]]]
+    s = state(store, data_dir, aid)
+    held = {h["ticker"]: h for h in s["holdings"]}
+    key = f"rebalance:{today}"
+    sold = bought = 0
+    for tk in held:
+        if tk not in target:
+            place(store, aid, tk, "sell", shares=0, source=key, note="left the top list", now=now)
+            sold += 1
+    each = s["value"] / spec["n"]
+    for tk in target:
+        if tk not in held:
+            place(store, aid, tk, "buy", value=each, source=key, note="entered the top list", now=now)
+            bought += 1
+    store.conn.execute("INSERT INTO paper_marks VALUES (?,?,?,?)",
+                       (aid, today, "rebalance", json.dumps({"target": target, "sell": sold, "buy": bought})))
+    store.conn.commit()
+    return {"rebalance": True, "sell": sold, "buy": bought, "target": target}
+
+
 def run_all(store, data_dir: str, fetch: bool = True, log=print) -> dict:
     """The daily job: queue strategy orders, then fill whatever can be filled."""
     _init(store)
     queued = {}
     for a in accounts(store):
-        if a["kind"] == "strategy":
+        if a["kind"] in ("strategy", "forecast"):
             try:
-                queued[a["id"]] = step_strategy(store, data_dir, a["id"], fetch=fetch, log=log)
+                queued[a["id"]] = (step_strategy if a["kind"] == "strategy" else step_forecast)(
+                    store, data_dir, a["id"], fetch=fetch)
             except Exception as e:
                 queued[a["id"]] = {"error": str(e)[:200]}
     return {"queued": queued, "processed": process(store, data_dir, fetch, log)}

@@ -265,6 +265,11 @@ def walk_forward(F: dict, px: pd.DataFrame, horizon: int, holdout: pd.Timestamp 
     out["latest"] = {tk: float(v) for tk, v in s.dropna().items()}
     e = out["explore"]
     out["passes"] = bool(e.get("t") is not None and e["t"] >= 2.0 and e.get("ic_t") is not None and e["ic_t"] >= 2.0)
+    h = out["holdout"]
+    # the locked recent years decide whether a historical pass still holds
+    out["status"] = ("fails" if not out["passes"] else
+                     "unconfirmed" if not h.get("periods") or h["periods"] < 2 else
+                     "confirmed" if (h.get("net") or 0) > 0 else "decayed")
     return out
 
 
@@ -302,14 +307,21 @@ def stock_view(res: dict, ticker: str, lang: str = "zh") -> dict | None:
             continue
         out["as_of"] = r.get("as_of")
         e, h = r.get("explore", {}), r.get("holdout", {})
-        ok = r.get("passes")
+        ok = r.get("status") == "confirmed"
         out["horizons"].append({
-            "horizon": name, "pct": x["pct"], "expected": x["expected"], "reliable": ok,
+            "horizon": name, "pct": x["pct"], "expected": x["expected"], "reliable": ok, "status": r.get("status"),
             "track": {"periods": e.get("periods"), "net_per_year": e.get("net_per_year"), "t": e.get("t"),
                       "ic": e.get("ic"), "hit": e.get("hit")},
             "holdout": {"periods": h.get("periods"), "net": h.get("net"), "t": h.get("t")},
             "text": _line(name, x, r, zh)})
     return out if out["horizons"] else None
+
+
+STATUS_ZH = {"confirmed": "模型通过检验，最近两年也站得住", "decayed": "模型历史上通过检验，但最近两年失效了，只能参考",
+             "unconfirmed": "模型历史上通过检验，最近两年的数据还不够确认", "fails": "模型没通过检验，只能参考"}
+STATUS_EN = {"confirmed": "passed its tests and held up in the last two years",
+             "decayed": "passed historically but failed in the last two years; context only",
+             "unconfirmed": "passed historically; too little recent data to confirm", "fails": "did not pass its tests; context only"}
 
 
 def _line(name: str, x: dict, r: dict, zh: bool) -> str:
@@ -321,14 +333,14 @@ def _line(name: str, x: dict, r: dict, zh: bool) -> str:
         s = f"未来 {hz}：在可比的 A 股里排第 {rank} 百分位（100 最看好）"
         if exp is not None:
             s += f"，历史上同档股票平均相对大盘 {100 * exp:+.1f}%"
-        s += "。" + ("模型通过了检验" if r.get("passes") else "模型没通过检验，只能参考")
+        s += "。" + STATUS_ZH.get(r.get("status") or ("fails" if not r.get("passes") else "unconfirmed"), "")
         if e.get("periods"):
             s += f"（买前 10%：扣成本后每年 {100 * (e.get('net_per_year') or 0):+.1f}%，t = {e.get('t') or 0:+.1f}，{e['periods']} 期）"
         return s
     s = f"Next {hz}: {rank}th percentile of the stocks covered (100 = most favoured)"
     if exp is not None:
         s += f"; stocks in that tenth averaged {100 * exp:+.1f}% vs the market"
-    s += ". " + ("The model passed its tests" if r.get("passes") else "The model did not pass its tests; context only")
+    s += ". The model " + STATUS_EN.get(r.get("status") or "fails", "")
     if e.get("periods"):
         s += f" (top 10%: {100 * (e.get('net_per_year') or 0):+.1f}%/yr after costs, t = {e.get('t') or 0:+.1f}, {e['periods']} periods)"
     return s
@@ -349,11 +361,12 @@ def summary_text(res: dict, lang: str = "zh") -> list[str]:
         if zh:
             out.append(f"{hz}：排序能力 IC {e['ic']:+.3f}（t = {e.get('ic_t') or 0:+.1f}），买前 10% 扣成本后每年 "
                        f"{100 * e['net_per_year']:+.1f}%（t = {e.get('t') or 0:+.1f}，{e['periods']} 期，{100 * e['hit']:.0f}% 的期数赚钱）"
-                       + ("，通过检验" if r.get("passes") else "，没通过检验")
+                       + {"confirmed": "，通过检验且近两年确认", "decayed": "，历史通过但近两年失效",
+                          "unconfirmed": "，历史通过、近两年待确认", "fails": "，没通过检验"}.get(r.get("status") or "fails", "")
                        + (f"；锁定的近两年 {h['periods']} 期，平均每期 {100 * (h.get('net') or 0):+.1f}%" if h.get("periods") else "") + "。")
         else:
             out.append(f"{hz}: IC {e['ic']:+.3f} (t = {e.get('ic_t') or 0:+.1f}); top 10% {100 * e['net_per_year']:+.1f}%/yr after costs "
-                       f"(t = {e.get('t') or 0:+.1f}, {e['periods']} periods)" + (", passes" if r.get("passes") else ", does not pass")
+                       f"(t = {e.get('t') or 0:+.1f}, {e['periods']} periods)" + (", " + (r.get("status") or "fails"))
                        + (f"; locked last two years: {h['periods']} periods, {100 * (h.get('net') or 0):+.1f}% each" if h.get("periods") else "") + ".")
     return out
 
@@ -370,9 +383,27 @@ def all_codes(data_dir: str) -> list[str]:
     return sorted(c for c in codes if c[0] in "036")            # Shanghai / Shenzhen A-shares (no B shares, no BJ)
 
 
+def download_reports(data_dir: str, since: str = "2005", log=print) -> int:
+    """Fill the 业绩报表 cache back to `since` (one Eastmoney request per report period, about 2 s each)."""
+    from stockproof import cn, research_cn as rc, screener
+    cache = cn.CNCache(data_dir)
+    periods = [p for p in rc.period_ends(f"{since}-01-01") if p < "20150101"]
+    got = 0
+    for k, p in enumerate(periods, 1):
+        try:
+            rows = screener.period_full(cache, p)
+            got += 1
+            if k % 4 == 0:
+                log(f"  reports: {p} ({len(rows)} companies)")
+        except Exception as e:
+            log(f"  reports {p}: {type(e).__name__}: {str(e)[:80]}")
+    return got
+
+
 def download_prices(data_dir: str, start: str = "2015-01-01", batch: int = 200, log=print) -> dict:
     """Adjusted daily closes for the whole A-share market from Yahoo Finance, in resumable batches
-    (research/allpx/). About 30-60 minutes the first time; reruns skip finished batches."""
+    (research/allpx/, or allpx_<year>/ for an earlier start). About 30-60 minutes the first time;
+    reruns skip finished batches."""
     try:
         import yfinance as yf
     except ImportError as e:
@@ -381,7 +412,7 @@ def download_prices(data_dir: str, start: str = "2015-01-01", batch: int = 200, 
     codes = all_codes(data_dir)
     if not codes:
         raise RuntimeError("no 业绩报表 cache: run `stockproof screen` once first")
-    out_dir = os.path.join(_dir(data_dir), "allpx")
+    out_dir = os.path.join(_dir(data_dir), "allpx" if start >= "2015" else f"allpx_{start[:4]}")
     os.makedirs(out_dir, exist_ok=True)
     yahoo = {c: c + (".SS" if c[0] == "6" else ".SZ") for c in codes}
     ours = {v: c + (".SH" if c[0] == "6" else ".SZ") for c, v in yahoo.items()}
@@ -420,3 +451,36 @@ def download_prices(data_dir: str, start: str = "2015-01-01", batch: int = 200, 
     allpx.to_csv(os.path.join(_dir(data_dir), "cn_all_prices.csv.gz"), compression="gzip")
     return {"stocks": int(allpx.shape[1]), "codes": len(codes), "days": int(allpx.shape[0]),
             "from": allpx.index[0].date().isoformat(), "to": allpx.index[-1].date().isoformat(), "failed_batches": failed}
+
+
+def update_prices(data_dir: str, batch: int = 400, log=print) -> dict:
+    """Append the days since the saved whole-market prices end (a few minutes), so monthly refits stay current."""
+    import yfinance as yf
+    p = os.path.join(_dir(data_dir), "cn_all_prices.csv.gz")
+    if not os.path.exists(p):
+        return {"skipped": "no whole-market prices yet"}
+    old = pd.read_csv(p, index_col=0, parse_dates=True).sort_index()
+    start = (old.index[-1] - pd.Timedelta(days=10)).date().isoformat()
+    cols = list(old.columns)
+    yahoo = {c: c[:6] + (".SS" if c.endswith(".SH") else ".SZ") for c in cols}
+    back = {v: k for k, v in yahoo.items()}
+    parts = []
+    for i in range(0, len(cols), batch):
+        ch = [yahoo[c] for c in cols[i:i + batch]]
+        try:
+            df = yf.download(ch, start=start, auto_adjust=True, progress=False, threads=True)["Close"]
+            parts.append(df.rename(columns=back))
+        except Exception as e:
+            log(f"  update batch {i // batch + 1}: {type(e).__name__}")
+    if not parts:
+        return {"error": "download failed"}
+    new = pd.concat(parts, axis=1).round(4)
+    new = new[new.index < pd.Timestamp(dt.date.today())]
+    # adjusted prices can shift with new dividends: rescale each stock's new data to the saved last close
+    overlap = old.index.intersection(new.index)
+    if len(overlap):
+        ratio = (old.loc[overlap[-1]] / new.loc[overlap[-1]]).reindex(new.columns)
+        new = new * ratio.fillna(1.0)
+    merged = pd.concat([old[old.index < new.index[0]], new.reindex(columns=old.columns)]) if len(new) else old
+    merged.to_csv(p, compression="gzip")
+    return {"to": merged.index[-1].date().isoformat(), "days_added": int(len(merged) - len(old))}

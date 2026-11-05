@@ -114,3 +114,17 @@ def test_strategy_account_enters_exits_and_reports_gap(env, monkeypatch):
 def paper_spec(spec):
     from stockproof import lab
     return lab.validate(spec)
+
+
+def test_forecast_account_rebalances_quarterly(env):
+    d, store, _ = env
+    import json as _j, os
+    os.makedirs(d / "research", exist_ok=True)
+    (d / "research" / "forecast_cn.json").write_text(_j.dumps({"horizons": {"6m": {"status": "decayed", "explore": {},
+                                                                             "stocks": {"600000.SH": {"pct": 0.9}}}}}))
+    fid = paper.create_forecast_account(store, str(d), "6m", n=1, cash=100_000)
+    r = paper.step_forecast(store, str(d), fid, now=at("2026-03-02"))
+    assert r["rebalance"] and r["buy"] == 1
+    paper.process(store, str(d), fetch=False)
+    assert paper.step_forecast(store, str(d), fid, now=at("2026-03-10"))["rebalance"] is False     # within the quarter
+    assert "失效" in paper.account(store, fid)["note"]

@@ -48,6 +48,6 @@ def test_stock_view_and_text():
                                                              "t": 0.6, "hit": 0.55},
         "holdout": {"periods": 4, "net": 0.002, "t": 0.3}, "stocks": {"600519.SH": {"pct": 0.91, "expected": 0.012}}}}}
     v = fc.stock_view(res, "600519.SH")
-    assert v["horizons"][0]["pct"] == 0.91 and "没通过" in v["horizons"][0]["text"]
+    assert v["horizons"][0]["pct"] == 0.91 and "没通过" in v["horizons"][0]["text"] and v["horizons"][0]["status"] is None
     assert fc.stock_view(res, "AAPL") is None
     assert any("3 个月" in x for x in fc.summary_text(res))

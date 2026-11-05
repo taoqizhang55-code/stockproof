@@ -213,7 +213,7 @@ BODY = """
   <h2 id="pp-h"></h2>
   <p class="note" id="pp-lead"></p>
   <div class="toolbar"><input id="pp-name" class="btn" style="width:160px"><input id="pp-cash" class="btn" style="width:120px" value="1000000">
-    <button class="btn primary" id="pp-new"></button><button class="btn" id="pp-run"></button><span class="note" id="pp-msg"></span></div>
+    <button class="btn primary" id="pp-new"></button><button class="btn" id="pp-fc"></button><button class="btn" id="pp-run"></button><span class="note" id="pp-msg"></span></div>
   <div id="pp-accounts"></div>
 </section>
 <section class="card" style="margin-top:12px" id="pp-detail-card" hidden><div id="pp-detail"></div></section>
@@ -334,7 +334,7 @@ function applyText() {
   $("#tab-money").textContent = tr("d_tab_money");
   $("#ask-input").placeholder = tr("d_ask_placeholder"); $("#ask-go").textContent = tr("d_ask_go");
   $("#tab-paper").textContent = tr("d_tab_paper"); $("#pp-h").textContent = tr("d_pp_h"); $("#pp-lead").textContent = tr("d_pp_lead");
-  $("#pp-name").placeholder = tr("d_pp_name"); $("#pp-new").textContent = tr("d_pp_new"); $("#pp-run").textContent = tr("d_pp_run");
+  $("#pp-name").placeholder = tr("d_pp_name"); $("#pp-new").textContent = tr("d_pp_new"); $("#pp-fc").textContent = tr("d_pp_fc"); $("#pp-run").textContent = tr("d_pp_run");
   $("#al-h").textContent = tr("d_al_h"); $("#al-check").textContent = tr("d_al_check");
   $("#tab-team").textContent = tr("d_tab_team"); $("#team-h").textContent = tr("d_team_page_h"); $("#team-lead").textContent = tr("d_team_page_lead");
   $("#team-input").placeholder = tr("d_team_placeholder"); $("#team-go").textContent = tr("d_team_go"); $("#team-hist-h").textContent = tr("d_team_hist"); $("#mm-download").textContent = tr("d_mm_download");
@@ -679,7 +679,7 @@ async function loadPaper(id) {
   try { PP = await api("/api/paper" + (ppSel ? "?id=" + encodeURIComponent(ppSel) : "")); } catch (e) { PP = {accounts: []}; }
   const A = PP.accounts || [];
   $("#pp-accounts").innerHTML = A.length ? `<table><thead><tr><th>${esc(tr("d_pp_acct"))}</th><th>${esc(tr("d_pp_value"))}</th><th>${esc(tr("d_pp_ret"))}</th><th>${esc(tr("d_pp_bench"))}</th><th>${esc(tr("d_pp_excess"))}</th><th>${esc(tr("d_pp_dd"))}</th><th></th></tr></thead><tbody>` +
-    A.map((a) => `<tr class="pp-row" data-pp="${esc(a.id)}" style="cursor:pointer"><td class="tk">${esc(a.name)}<small>${esc(a.kind === "strategy" ? tr("d_pp_strategy") : tr("d_pp_manual"))} · ${esc(tr("d_pp_since", {d: a.start_day}))}</small></td>
+    A.map((a) => `<tr class="pp-row" data-pp="${esc(a.id)}" style="cursor:pointer"><td class="tk">${esc(a.name)}<small>${esc(a.kind === "strategy" ? tr("d_pp_strategy") : a.kind === "forecast" ? tr("d_pp_fckind") : tr("d_pp_manual"))} · ${esc(tr("d_pp_since", {d: a.start_day}))}</small></td>
       <td class="num">${money(a.value)}</td><td>${pctChip(a["return"])}</td><td>${a.benchmark_return == null ? "—" : pctChip(a.benchmark_return)}</td>
       <td>${a.excess == null ? "—" : pctChip(a.excess)}</td><td class="num">${pct1(a.max_drawdown)}</td><td class="note">${a.pending ? esc(tr("d_pp_pending", {n: a.pending})) : ""}</td></tr>`).join("") + `</tbody></table>`
     : `<p class="empty">${esc(tr("d_pp_none"))}</p>`;
@@ -716,6 +716,7 @@ async function loadPxAlerts(check) {
   $("#al-list").innerHTML = R.length ? `<ul class="pts">${R.map((a) => `<li><span class="note">${esc(a.created_at.slice(5, 16).replace("T", " "))}</span> ${esc(a.text)}</li>`).join("")}</ul>` : `<p class="empty">${esc(tr("d_al_none"))}</p>`;
 }
 $("#pp-new").onclick = async () => { await ppAct({action: "new", name: $("#pp-name").value, cash: Number($("#pp-cash").value) || 1000000}); loadPaper(); };
+$("#pp-fc").onclick = async () => { $("#pp-msg").textContent = "…"; await ppAct({action: "forecast", horizon: "6m", n: 50, cash: Number($("#pp-cash").value) || 1000000}); loadPaper(); };
 $("#pp-run").onclick = async () => { $("#pp-msg").textContent = tr("d_pp_running"); await ppAct({action: "run"}); loadPaper(); };
 $("#al-check").onclick = () => { $("#al-meta").textContent = "…"; loadPxAlerts(true); };
 document.addEventListener("click", async (e) => {
@@ -845,13 +846,15 @@ async function loadForecast(tk) {
   if (!v) h += `<p class="note">${esc(tr("d_fc_none"))}</p>`;
   else h += `<table><tbody>${v.horizons.map((x) => `<tr><td><b>${esc(tr("d_fc_" + x.horizon))}</b></td>
       <td class="num">${esc(tr("d_fc_pct", {p: Math.round(100 * x.pct)}))}</td><td>${x.expected == null ? "—" : pctChip(x.expected)}</td>
-      <td><span class="chip ${x.reliable ? "positive" : "neutral"}">${esc(tr(x.reliable ? "d_fc_ok" : "d_fc_weak"))}</span></td></tr>`).join("")}</tbody></table>
+      <td><span class="chip ${x.reliable ? "positive" : "neutral"}">${esc(tr("d_fc_st_" + (x.status || "fails")))}</span></td></tr>`).join("")}</tbody></table>
       <p class="note">${esc(tr("d_fc_explain"))}</p>`;
   h += `<details><summary>${esc(tr("d_fc_track"))}</summary><ul class="pts">${(r.summary || []).map((x) => `<li>${esc(x)}</li>`).join("")}</ul>
-    <p>${r.universe === "all" ? "" : job("forecast_download")} ${job("forecast")}</p></details>`;
+    <p>${r.universe === "all" ? "" : job("forecast_download")} ${job("forecast")} <button class="btn sm" data-fcpaper="1">${esc(tr("d_pp_fc"))}</button></p></details>`;
   box.innerHTML = h;
 }
 document.addEventListener("click", async (e) => {
+  const fp = e.target.closest("[data-fcpaper]");
+  if (fp) { const r = await ppAct({action: "forecast", horizon: "6m", n: 50}); if (!r.error) showTab("paper"); else fp.insertAdjacentHTML("afterend", ` <span class="err">${esc(r.error)}</span>`); return; }
   const b = e.target.closest("[data-fcjob]");
   if (!b) return;
   const x = await api("/api/refresh", {kind: b.dataset.fcjob});
