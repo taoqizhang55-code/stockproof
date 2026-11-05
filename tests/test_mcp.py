@@ -96,7 +96,7 @@ def test_menu_lists_every_tool(tmp_path):
     t = mcp_server.Tools(str(tmp_path))
     menu = t.stockproof_menu("zh")
     listed = {x for g in menu["groups"] for x in g["tools"]}
-    assert [g["group"] for g in menu["groups"]] == ["日常看盘", "AI 投研团队", "一句话与分享卡片", "模拟盘与提醒", "资金地图", "选股与评分卡", "量化实验室", "持仓体检", "网页看板"]
+    assert [g["group"] for g in menu["groups"]] == ["日常看盘", "AI 投研团队", "一句话与分享卡片", "模拟盘与提醒", "中长期预测", "资金地图", "选股与评分卡", "量化实验室", "持仓体检", "网页看板"]
     try:
         names = {x.name for x in _a.run(mcp_server.build_server(t).list_tools())}
     except Exception:

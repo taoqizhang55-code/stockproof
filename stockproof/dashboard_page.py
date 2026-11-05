@@ -375,7 +375,7 @@ function renderStatus() {
     prog.firstElementChild.style.width = (j.total ? 100 * j.done / j.total : 0) + "%";
     const cur = (j.kind || "").startsWith("research_") ? tr("d_tab_research") + " · " + tr("d_market_" + j.kind.slice(9))
       : j.kind === "screen" ? tr("d_tab_screen") : j.kind === "moneymap" ? tr("d_tab_money") : j.kind === "etf" ? tr("d_etf_title")
-      : j.kind === "margin" ? tr("d_margin_title") : j.kind === "ntresearch" ? tr("d_nt_h") : j.kind === "moneyhistory" ? tr("d_mm_hist_title") : (j.current || "…");
+      : j.kind === "margin" ? tr("d_margin_title") : j.kind.startsWith("forecast") ? tr("d_fc_h") : j.kind === "ntresearch" ? tr("d_nt_h") : j.kind === "moneyhistory" ? tr("d_mm_hist_title") : (j.current || "…");
     st.textContent = tr("d_running", {current: cur, done: j.done, total: j.total});
   } else if (j.error) {
     st.innerHTML = `<span class="err">${esc(tr("d_failed", {error: j.error}))}</span>`;
@@ -748,7 +748,7 @@ async function askOne(text) {
   const tk = r.ticker, a = r.args || {};
   const follow = async () => { if (tk && !S.watchlist.includes(tk)) S = await api("/api/watchlist", {tickers: [...S.watchlist, tk]}); };
   const map = {
-    team: {act: "teamtext", arg: text}, team_record: {act: "teamtab"}, day: {act: "day", arg: tk, date: a.date},
+    forecast: {act: "stock", arg: tk}, team: {act: "teamtext", arg: text}, team_record: {act: "teamtab"}, day: {act: "day", arg: tk, date: a.date},
     why: {act: "why", arg: tk}, technical: {act: "stock", arg: tk}, compare: {act: "stock", arg: tk}, scorecard: {act: "stock", arg: tk},
     nt_research: {act: "ntsec"}, smart_money: {act: "holders", arg: tk}, moneymap: {act: "money", arg: a.category || "national"},
     etf: {act: "money", arg: "national"}, margin: {act: "margin"}, breakouts: {act: "breakouts"},
@@ -831,6 +831,32 @@ document.addEventListener("keydown", (e) => {
   const all = [...document.querySelectorAll(".khit")].map((r) => r.dataset.kday), i = all.indexOf(dayDate);
   const j = i + (e.key === "ArrowLeft" ? -1 : 1);
   if (i >= 0 && j >= 0 && j < all.length) { e.preventDefault(); showDay(dayTk, all[j]); }
+});
+
+// ---------- 3/6/12-month forecast on the stock page ----------
+async function loadForecast(tk) {
+  const box = $("#fc-box"); if (!box) return;
+  let r; try { r = await api(`/api/forecast?ticker=${encodeURIComponent(tk)}&lang=${S.lang}`); } catch (e) { box.innerHTML = ""; return; }
+  if (selected !== tk) return;
+  const job = (kind) => `<button class="btn sm" data-fcjob="${kind}">${esc(tr(kind === "forecast" ? "d_fc_run" : "d_fc_dl"))}</button>`;
+  if (r.need_run) { box.innerHTML = `<h3>${esc(tr("d_fc_h"))}</h3><p class="note">${esc(tr("d_fc_need"))}</p><p>${job("forecast")} ${job("forecast_download")}</p>`; return; }
+  const v = r.stock;
+  let h = `<h3>${esc(tr("d_fc_h"))} <span class="note">${esc(tr("d_fc_asof", {d: (v && v.as_of) || r.made}))}</span></h3>`;
+  if (!v) h += `<p class="note">${esc(tr("d_fc_none"))}</p>`;
+  else h += `<table><tbody>${v.horizons.map((x) => `<tr><td><b>${esc(tr("d_fc_" + x.horizon))}</b></td>
+      <td class="num">${esc(tr("d_fc_pct", {p: Math.round(100 * x.pct)}))}</td><td>${x.expected == null ? "—" : pctChip(x.expected)}</td>
+      <td><span class="chip ${x.reliable ? "positive" : "neutral"}">${esc(tr(x.reliable ? "d_fc_ok" : "d_fc_weak"))}</span></td></tr>`).join("")}</tbody></table>
+      <p class="note">${esc(tr("d_fc_explain"))}</p>`;
+  h += `<details><summary>${esc(tr("d_fc_track"))}</summary><ul class="pts">${(r.summary || []).map((x) => `<li>${esc(x)}</li>`).join("")}</ul>
+    <p>${r.universe === "all" ? "" : job("forecast_download")} ${job("forecast")}</p></details>`;
+  box.innerHTML = h;
+}
+document.addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-fcjob]");
+  if (!b) return;
+  const x = await api("/api/refresh", {kind: b.dataset.fcjob});
+  if (x.message === "demo") return alert(tr("d_demo_refresh"));
+  S = await api("/api/state"); renderStatus(); startPolling();
 });
 
 async function askWhy(tk, day) {
@@ -957,7 +983,7 @@ function renderDetail(d) {
   if (!d) { box.innerHTML = `<p class="empty">${esc(tr("d_select"))}</p>`; return; }
   const minRel = d.min_relevance, heads = d.headlines.filter((h) => showLow || (h.relevance >= minRel && !h.dup));
   const otherLang = d.headlines.some((h) => h.lang && h.lang !== S.lang);
-  let h = `<h2>${esc(d.ticker)} · ${esc(d.name)} <a class="back" href="#overview" title="↑">↑</a></h2>${priceHTML(d)}${techHTML(d.technical)}<h3>${esc(tr("d_history"))}</h3>${chartSVG(d.history)}
+  let h = `<h2>${esc(d.ticker)} · ${esc(d.name)} <a class="back" href="#overview" title="↑">↑</a></h2>${priceHTML(d)}${techHTML(d.technical)}${!/\.(SH|SZ|BJ)$/.test(d.ticker) ? `<p class="note">${esc(tr(/\.HK$/.test(d.ticker) ? "d_bm_hk" : "d_bm_us"))}</p>` : `<div id="fc-box" class="histbox" style="margin-top:10px"></div><details class="bigmoney" ontoggle="if(this.open)loadStockMoney('${esc(d.ticker)}')"><summary><b>${esc(tr("d_bm_title"))}</b> <span class="note">${esc(tr("d_bm_sub"))}</span></summary><div id="stock-money"></div></details>`}<h3>${esc(tr("d_history"))}</h3>${chartSVG(d.history)}
     <h3>${esc(tr("d_headlines"))} <span class="num">${heads.length} / ${d.headlines.length}</span></h3>
     <label class="toggle"><input type="checkbox" id="low" ${showLow ? "checked" : ""}> ${esc(tr("d_show_low"))}</label>`;
   if (otherLang) h += `<p class="note">${esc(tr("d_other_lang"))}</p>`;
@@ -970,6 +996,7 @@ function renderDetail(d) {
   const annHTML = (d.announcements || []).length
     ? `<h3>${esc(tr("d_anns_stock"))}</h3>` + d.announcements.map((a) => annLine(a, false)).join("") : "";
   box.innerHTML = h + rankHTML(d) + earningsHTML(d.earnings, d.eps, d.forecast) + historyHTML(d.report, d.history_like) + annHTML;
+  if ($("#fc-box")) loadForecast(d.ticker);
   $("#low").onchange = (e) => { showLow = e.target.checked; renderDetail(d); };
 }
 
@@ -1189,8 +1216,31 @@ async function renderMoneyDetail(tk) {
   box.innerHTML = `<p class="note">${esc(tr("d_lab_wait"))}</p>`;
   let r; try { r = await api(`/api/smartmoney?ticker=${encodeURIComponent(tk)}&lang=${S.lang}`); } catch (e) { r = {error: e.message}; }
   if (r.error) { box.innerHTML = `<p class="err">${esc(r.error)}</p>`; return; }
+  box.innerHTML = `<h2>${esc(tk)}${r.name ? " · " + esc(r.name) : ""}</h2>` + smartMoneyHTML(r);
+}
+
+// who holds it, who is trading it: shared by the money tab and the stock page
+function bigMoneySignals(r) {
+  const out = [], kinds = new Set((r.holders || []).map((x) => x.category).filter(Boolean));
+  const lab = (k) => { const x = (r.holders || []).find((h) => h.category === k); return x && x.label ? x.label.replace(/（.*）/, "") : k; };
+  if (kinds.size) out.push(tr("d_bm_holders", {k: [...kinds].map(lab).join("、")}));
+  else out.push(tr("d_bm_noholders"));
+  const adds = (r.holders || []).filter((x) => x.category && ["new", "add"].includes(x.action)).length;
+  const cuts = (r.holders || []).filter((x) => x.category && x.action === "reduce").length + (r.exits || []).length;
+  if (adds || cuts) out.push(tr("d_bm_flow", {a: adds, c: cuts}));
+  const lhb = r.dragon_tiger || [];
+  if (lhb.length) {
+    const inst = lhb.reduce((s, x) => s + (x.inst_net || 0), 0);
+    out.push(tr("d_bm_lhb", {n: lhb.length, v: yi(inst)}));
+  }
+  if (r.main_force) out.push(tr("d_bm_main", {d: r.main_force.days, v: yi(r.main_force.net), p: r.main_force.positive_days}));
+  if (r.margin && r.margin.available) out.push(tr("d_bm_margin", {p: pct1(r.margin.change_pct)}));
+  return out;
+}
+
+function smartMoneyHTML(r) {
   const act = {new: tr("d_mm_new"), add: tr("d_mm_add"), reduce: tr("d_mm_reduce"), same: tr("d_mm_same")};
-  let h = `<h2>${esc(tk)}${r.name ? " · " + esc(r.name) : ""}</h2><p>${esc(r.summary || "")}</p>`;
+  let h = `<ul class="pts">${bigMoneySignals(r).map((x) => `<li>${esc(x)}</li>`).join("")}</ul>${r.summary ? `<p class="note">${esc(r.summary)}</p>` : ""}`;
   if ((r.exits || []).length) h += `<h3>${esc(tr("d_mm_t_exits", {q: r.previous_quarter || ""}))}</h3><table><tbody>` + r.exits.map((x) =>
     `<tr><td><span class="chip neutral">${esc((x.label || "").replace(/（.*）/, ""))}</span> ${esc(x.display)}</td>
      <td><span class="chip ${x.confidence === "inferred" ? "negative" : "neutral"}">${esc(tr("d_mm_conf_" + x.confidence))}</span></td>
@@ -1205,8 +1255,21 @@ async function renderMoneyDetail(tk) {
   if (mg && mg.available) h += `<p class="note">${esc(tr("d_mm_margin", {a: mg.from, b: mg.to, v: yi(mg.balance).replace("+", ""), c: yi(mg.change), p: pct1(mg.change_pct)}))}</p>`;
   else if (mg && mg.note) h += `<p class="note">${esc(mg.note)}</p>`;
   if (r.main_force) h += `<p class="note">${esc(tr("d_mm_mainforce", {d: r.main_force.days, v: yi(r.main_force.net), p: r.main_force.positive_days}))} ${esc(r.main_force.note || "")}</p>`;
-  box.innerHTML = h;
+  return h + `<p class="note">${esc(tr("d_bm_caveat"))}</p>`;
 }
+
+async function loadStockMoney(tk) {
+  const box = $("#stock-money"); if (!box || box.dataset.tk === tk) return;
+  box.dataset.tk = tk;
+  box.innerHTML = `<p class="note">${esc(tr("d_lab_wait"))}</p>`;
+  let r; try { r = await api(`/api/smartmoney?ticker=${encodeURIComponent(tk)}&lang=${S.lang}`); } catch (e) { r = {error: e.message}; }
+  if (selected !== tk) return;
+  box.innerHTML = r.error ? `<p class="note">${esc(r.error)}</p>` : smartMoneyHTML(r) + `<p><a href="#" data-gomoney="${esc(tk)}">${esc(tr("d_bm_more"))}</a></p>`;
+}
+document.addEventListener("click", (e) => {
+  const g = e.target.closest("[data-gomoney]");
+  if (g) { e.preventDefault(); showTab("money"); setTimeout(() => renderMoneyDetail(g.dataset.gomoney), 400); }
+});
 
 let BRK = null;
 async function loadBreakouts() {

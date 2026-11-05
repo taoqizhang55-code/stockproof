@@ -270,11 +270,19 @@ def quarter_panel(data_dir: str, log=print) -> pd.DataFrame:
 
 
 def predict_test(data_dir: str, panel: pd.DataFrame | None = None, k: int = TOP_K, min_train: int = 8,
-                 log=print) -> dict:
+                 log=print, early: bool = False, hold: int | None = None) -> dict:
+    """Default: forecast at the quarter's end, buy then, sell on the report date (front-running the disclosure).
+    early=True: forecast at the quarter's START (no prices from the quarter itself), buy then and hold `hold`
+    trading days, i.e. try to buy before the national team does and hold like a long-term investor."""
     from stockproof import lab
     p = quarter_panel(data_dir, log) if panel is None else panel
     if p.empty:
         return {"available": False}
+    if early:
+        p = p.sort_values(["ticker", "quarter"]).copy()
+        for c in ("qtr_return", "qtr_drawdown"):
+            p[c] = p.groupby("ticker")[c].shift(1)
+        p = p.dropna(subset=["qtr_return", "qtr_drawdown"])
     live = p[p["y"].isna()]
     p = p[p["y"].notna()]
     px = lab.stock_prices(data_dir, "cn")
@@ -298,11 +306,17 @@ def predict_test(data_dir: str, panel: pd.DataFrame | None = None, k: int = TOP_
         base = float(te["y"].mean())
         # trade: buy the top picks at the quarter's end, sell at each stock's report date (or 60 days at most)
         qend = pd.Timestamp(q)
-        i0 = int(px.index.searchsorted(qend, side="right")) - 1
+        t0 = qend - pd.offsets.QuarterEnd(1) if early else qend
+        i0 = int(px.index.searchsorted(t0, side="right")) - 1
+        if early and i0 + (hold or 250) >= len(px):
+            continue
 
         def ret(tk, pub):
-            j = px.index.searchsorted(pd.Timestamp(pub), side="left") if isinstance(pub, str) else i0 + 40
-            j = min(max(j, i0 + 1), i0 + 60, len(px) - 1)
+            if early:
+                j = i0 + (hold or 250)
+            else:
+                j = px.index.searchsorted(pd.Timestamp(pub), side="left") if isinstance(pub, str) else i0 + 40
+                j = min(max(j, i0 + 1), i0 + 60, len(px) - 1)
             a, b = px[tk].iloc[i0], px[tk].iloc[j]
             return float(b / a - 1) if pd.notna(a) and pd.notna(b) else np.nan
         te["fwd"] = [ret(t, pub) for t, pub in zip(te["ticker"], te["public"])]
@@ -320,7 +334,7 @@ def predict_test(data_dir: str, panel: pd.DataFrame | None = None, k: int = TOP_
     gap = (df["top_return"] - df["rest_return"]).dropna()
     t = float(gap.mean() / gap.std(ddof=1) * math.sqrt(len(gap))) if len(gap) > 2 and gap.std(ddof=1) > 0 else None
     cost = 0.0035                                              # one round trip, A-shares
-    out = {"available": True, "quarters": per, "k": k,
+    out = {"available": True, "quarters": per, "k": k, "early": early, "hold": hold,
            "precision": float(df["precision"].mean()), "base_rate": float(df["base_rate"].mean()),
            "lift": float(df["precision"].mean() / df["base_rate"].mean()) if df["base_rate"].mean() else None,
            "auc": float(np.nanmean(df["auc"])),
@@ -372,16 +386,23 @@ def run(data_dir: str, log=print, fetch_etf: bool = False) -> dict:
     log("  1/3 signal tests against a matched baseline ...")
     ev = event_returns(data_dir, log=log)
     sig = signal_tests(ev, h0)
+    long = {}
+    for hd in (120, 250):
+        log(f"      ... holding {hd} days")
+        long[str(hd)] = signal_tests(event_returns(data_dir, hold=hd, log=lambda *a: None), h0)
     log("  2/3 ETF timing ...")
     etf = etf_timing(data_dir)
     log("  3/3 next-quarter prediction (walk-forward) ...")
-    pred = predict_test(data_dir, log=log)
+    panel = quarter_panel(data_dir, log)
+    pred = predict_test(data_dir, panel, log=log)
+    pred_early = predict_test(data_dir, panel, log=log, early=True, hold=250)
+    pred_early.pop("latest_picks", None)
     if pred.get("latest_picks"):
         names = _names(data_dir)
         for x in pred["latest_picks"]:
             x["name"] = names.get(x["ticker"][:6], "")
     out = {"made": dt.date.today().isoformat(), "hold_days": HOLD, "holdout_start": h0.date().isoformat(),
-           "signals": sig, "etf": etf, "predict": pred,
+           "signals": sig, "signals_long": long, "etf": etf, "predict": pred, "predict_early": pred_early,
            "universe": "research price universe: today's CSI 300 members (about 300 stocks)"}
     with open(_path(data_dir), "w", encoding="utf-8") as f:
         json.dump(out, f, ensure_ascii=False, default=str)
@@ -418,6 +439,27 @@ def summary_text(r: dict, lang: str = "zh") -> list[str]:
                      + ("确认了" if t.get("confirmed") else "没有确认") + f"（差 {100 * (h.get('diff') or 0):+.1f}%，t = {h.get('t') or 0:+.1f}）")
                     if zh else f"{t['kind']} {t['action']} on the locked holdout: "
                     + ("confirmed" if t.get("confirmed") else "not confirmed"))
+    for hd, ls in (r.get("signals_long") or {}).items():
+        lp = [t for t in ls["tests"] if t["passes"]]
+        lb = max(ls["tests"], key=lambda t: abs(t["t"] or 0))
+        keys = {(t["kind"], t["action"]): t for t in ls["tests"]}
+        so = keys.get(("social", "new")) or {}
+        na = keys.get(("national", "new")) or {}
+        if zh:
+            out.append(f"像社保那样拿得久（持有 {hd} 个交易日）："
+                       + ("没有一种信号过了门槛" if not lp else f"{len(lp)} 种过了门槛：" + "、".join(KIND_ZH[t['kind']] + ACT_ZH[t['action']] for t in lp))
+                       + f"（门槛 |t| ≥ {ls['bar']}）。跟着社保新进 {100 * (so.get('diff') or 0):+.1f}%（t = {so.get('t') or 0:+.1f}），"
+                       f"跟着国家队新进 {100 * (na.get('diff') or 0):+.1f}%（t = {na.get('t') or 0:+.1f}），都是和同月其他披露的股票比；"
+                       f"最强的是{KIND_ZH[lb['kind']]}{ACT_ZH[lb['action']]} {100 * (lb['diff'] or 0):+.1f}%（t = {lb['t'] or 0:+.1f}）。")
+        else:
+            out.append(f"Holding like a pension fund ({hd} trading days): " + ("no signal clears" if not lp else f"{len(lp)} clear")
+                       + f" the bar (|t| >= {ls['bar']}). Following pension new entries {100 * (so.get('diff') or 0):+.1f}% "
+                       f"(t = {so.get('t') or 0:+.1f}); national team new {100 * (na.get('diff') or 0):+.1f}% (t = {na.get('t') or 0:+.1f}).")
+        for t in lp:
+            h = t.get("holdout") or {}
+            out.append((f"  其中{KIND_ZH[t['kind']]}{ACT_ZH[t['action']]}在锁定的近两年上" + ("确认了" if t.get("confirmed") else "没有确认")
+                        + f"（{100 * (h.get('diff') or 0):+.1f}%，t = {h.get('t') or 0:+.1f}）") if zh else
+                       f"  {t['kind']} {t['action']} on the holdout: " + ("confirmed" if t.get("confirmed") else "not confirmed"))
     if e.get("available"):
         rs, rd = e["rescue"], e["redemption"]
         if zh:
@@ -440,4 +482,12 @@ def summary_text(r: dict, lang: str = "zh") -> list[str]:
                        f"{100 * p['base_rate']:.1f}% by chance ({p['lift']:.1f}x), AUC {p['auc']:.2f}. Buying them "
                        f"before the reports: {100 * (p['excess_per_quarter'] or 0):+.1f}% a quarter vs the rest, "
                        f"{100 * (p['excess_after_costs'] or 0):+.1f}% after costs (t = {p['t'] or 0:+.1f}).")
+    pe = r.get("predict_early") or {}
+    if pe.get("available"):
+        out.append((f"抢在国家队之前买（季度初预测、买入后拿一年）：前 {pe['k']} 名命中 {100 * pe['precision']:.0f}%（随便猜 "
+                    f"{100 * pe['base_rate']:.1f}%），一年后比其他股票平均 {100 * (pe['excess_per_quarter'] or 0):+.1f}%，扣成本 "
+                    f"{100 * (pe['excess_after_costs'] or 0):+.1f}%（t = {pe['t'] or 0:+.1f}，各期持有时间重叠，t 偏高）。") if zh else
+                   (f"Buying ahead of the national team (forecast at the quarter's start, hold a year): {100 * pe['precision']:.0f}% hit "
+                    f"vs {100 * pe['base_rate']:.1f}%; a year later {100 * (pe['excess_per_quarter'] or 0):+.1f}% vs the rest, "
+                    f"{100 * (pe['excess_after_costs'] or 0):+.1f}% after costs (t = {pe['t'] or 0:+.1f}, overlapping holds inflate t)."))
     return out

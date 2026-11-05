@@ -24,6 +24,8 @@ class App:
     ("AI 团队准不准", "team_record", None),
     ("随便聊聊", "menu", None),
     ("跟着国家队买能赚钱吗", "nt_research", None),
+    ("茅台未来半年会涨吗", "forecast", "600519.SH"),
+    ("科大讯飞未来 3 个月走势", "forecast", "002230.SZ"),
     ("能预测下季度国家队买什么吗", "nt_research", None),
     ("why did NVDA drop", "why", "NVDA"),
 ])

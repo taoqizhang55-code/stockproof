@@ -30,6 +30,7 @@ import pandas as pd
 from stockproof import clock, cn, quotes
 
 VERSION = 1
+HIT_MIN = 0.005          # excess return a bullish/bearish call must beat to count as a hit (one round trip of costs)
 ANALYSTS = ["fundamentals", "technical", "news", "flow", "policy"]
 PREFIX = {"fundamentals": "F", "technical": "T", "news": "N", "flow": "C", "policy": "P"}
 NAMES = {"zh": {"fundamentals": "基本面分析师", "technical": "技术面分析师", "news": "新闻分析师", "flow": "资金面分析师",
@@ -397,7 +398,8 @@ def score_calls(store, data_dir: str, fetch: bool = True) -> int:
         end = px.index[horizon]
         b = float(bm.loc[:end].iloc[-1] / bm.iloc[0] - 1)
         ex = r - b
-        hit = int(ex > 0) if stance == "bullish" else int(ex < 0) if stance == "bearish" else int(abs(ex) < 0.05)
+        # a hit has to beat one round trip of costs: a 0.1% "win" isn't worth trading
+        hit = int(ex > HIT_MIN) if stance == "bullish" else int(ex < -HIT_MIN) if stance == "bearish" else int(abs(ex) < 0.05)
         store.conn.execute("INSERT INTO team_scores VALUES (?,?,?,?,?,?,?)",
                            (cid, dt.datetime.now().isoformat(timespec="seconds"), end.date().isoformat(), r, b, ex, hit))
         n += 1
@@ -424,8 +426,9 @@ def track_record(store, lang: str = "zh", limit: int = 20) -> dict:
                                  for c, g in scored.groupby("confidence")}
         recent = scored.head(20)
         summ["decaying"] = bool(len(scored) >= 30 and len(recent) >= 20 and recent["hit"].mean() < scored["hit"].mean() - 0.15)
-    summ["note"] = (("命中率基于到期后的实际超额收益（相对大盘）；样本还少，仅供参考。" if zh else
-                     "Hit rate from realised excess returns after each horizon; small sample.") if len(scored) else
+    summ["note"] = (("命中率基于到期后的实际超额收益（相对大盘），而且要跑赢（或跑输）大盘超过 0.5%（一次买卖的成本）才算命中；样本还少，仅供参考。" if zh else
+                     "Hit rate from realised excess returns after each horizon; a hit must beat the market by more than "
+                     "0.5% (one round trip of costs); small sample.") if len(scored) else
                     ("还没有到期的判断，暂无战绩。" if zh else "No call has reached its horizon yet."))
     return {"summary": summ, "recent": json.loads(df.head(limit).to_json(orient="records", force_ascii=False))}
 

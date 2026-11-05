@@ -43,6 +43,8 @@ How to use it well:
 - "分析一下 X" / "X 能买吗" / "give me a view on X" -> research_team; pass what the user wants discussed as `question`
   in their words (e.g. "重点看扣非亏损会不会持续") (a cited multi-analyst view, logged and
   scored later; never present it as advice or an order). "How accurate is the team?" -> team_track_record.
+- "未来几个月/半年/一年会涨吗、长期走势" -> long_term_forecast (3/6/12-month rank with its track record; say if the
+  model failed its test). Never forecast tomorrow's direction.
 - "跟着国家队买能赚钱吗 / 预测国家队下季度买什么" -> national_team_research (not money_map).
 - Not sure which tool fits a sentence -> ask(text) returns the tool and arguments to call. "做成卡片 / 分享 /
   share this" -> share_card(kind, id) for a team call_id, a paper account or a lab experiment id.
@@ -495,7 +497,7 @@ class Tools:
                             + (" 持续盯盘：在终端运行 stockproof alerts --watch。" if lang == "zh" else
                                " For continuous watching run `stockproof alerts --watch`.")})
 
-    TOOL_FOR = {"nt_research": "national_team_research", "day": "day_detail", "team": "research_team", "team_record": "team_track_record", "why": "why_did_it_move",
+    TOOL_FOR = {"forecast": "long_term_forecast", "nt_research": "national_team_research", "day": "day_detail", "team": "research_team", "team_record": "team_track_record", "why": "why_did_it_move",
                 "technical": "technical_analysis", "smart_money": "smart_money", "moneymap": "money_map",
                 "etf": "national_team_etf", "margin": "market_leverage", "breakouts": "scan_market",
                 "compare": "compare_with_last_report", "calendar": "earnings_calendar", "digest": "daily_digest",
@@ -508,7 +510,7 @@ class Tools:
         client, _ = self._client()
         r = ask.route(self.app, text, client)
         a, tk = r["args"], r["ticker"]
-        args = {"day": {"ticker": tk, "date": a.get("date")}, "team": {"ticker": tk, "question": a.get("question")}, "why": {"ticker": tk}, "technical": {"ticker": tk, "open_chart": False},
+        args = {"forecast": {"ticker": tk}, "day": {"ticker": tk, "date": a.get("date")}, "team": {"ticker": tk, "question": a.get("question")}, "why": {"ticker": tk}, "technical": {"ticker": tk, "open_chart": False},
                 "smart_money": {"ticker": tk}, "moneymap": {"category": a.get("category", "national")},
                 "compare": {"ticker": tk}, "scorecard": {"ticker": tk},
                 "portfolio": {"holdings": a.get("holdings", [])}, "breakouts": {"direction": a.get("direction", "both")},
@@ -518,6 +520,27 @@ class Tools:
                             "howto": "Call next_tool with next_args now (for paper_order, the account defaults to the latest "
                                      "manual paper account: call paper_trading(action='list') first if unsure). If the "
                                      "intent looks wrong for what the user said, pick the right tool yourself."})
+
+    def long_term_forecast(self, ticker: str | None = None, refresh: bool = False, lang: str | None = None) -> dict:
+        from stockproof import forecast as fc
+        res = fc.load(self.app.data_dir)
+        if res is None or refresh:
+            try:
+                res = fc.run(self.app.data_dir, log=lambda *a: None)
+            except Exception as e:
+                return {"error": f"{type(e).__name__}: {str(e)[:200]}"}
+        lang = self._lang(lang)
+        out = {"made": res["made"], "universe": res.get("universe"), "track_record": fc.summary_text(res, lang),
+               "horizons": {k: {"passes": v.get("passes"), "explore": v.get("explore"), "holdout": v.get("holdout"),
+                                "weights": v.get("weights")} for k, v in res["horizons"].items()},
+               "note": "Forecast = rank vs all stocks over 3/6/12 months and the past average excess of that tenth. Say "
+                       "whether the model passed its walk-forward test (most don't); never present a failed model as a "
+                       "prediction. Whole-market prices: `stockproof forecast --download`. Not advice."}
+        if ticker:
+            out["stock"] = fc.stock_view(res, self._tk(ticker), lang)
+        if res.get("universe") != "all":
+            out["warning"] = "Only today's CSI 300 members are covered (survivorship); suggest `stockproof forecast --download`."
+        return self._clean(out)
 
     def national_team_research(self, refresh: bool = False, lang: str | None = None) -> dict:
         from stockproof import nt_research as nr
@@ -601,6 +624,7 @@ class Tools:
                         ["茅台能买吗？", "科大讯飞 10 月 15 号那天发生了什么？", "把刚才投研团队的结论做成分享卡片"]),
                       g("模拟盘与提醒", ["paper_trading", "price_alerts"],
                         ["建一个模拟盘，用 10 万模拟买入贵州茅台", "我的模拟盘跑赢沪深300 了吗？", "我的股票有没有突破或到达计划价位？"]),
+                      g("中长期预测", ["long_term_forecast"], ["贵州茅台未来半年会跑赢大盘吗？", "这个预测模型过去准不准？", "预测科大讯飞未来一年"]),
                       g("资金地图", ["national_team_research", "money_map", "national_team_etf", "market_leverage", "smart_money"],
                         ["国家队这个季度买了什么？", "最近有没有国家队托底的迹象？", "杠杆资金最近在加仓还是撤退？", "社保基金加仓了哪些行业？", "科大讯飞的十大股东里有没有国家队？"]),
                       g("选股与评分卡", ["screen_stocks", "scan_market", "evidence_scorecard"],
@@ -622,6 +646,7 @@ class Tools:
                         ["Should I buy NVDA?", "Make a share card of the team's view", "Make a card of my paper account"]),
                       g("Paper trading & alerts", ["paper_trading", "price_alerts"],
                         ["Open a paper account and buy 10k of NVDA", "Is my paper account beating the index?", "Any alerts on my stocks?"]),
+                      g("Forecasts", ["long_term_forecast"], ["Will Moutai beat the market over 6 months?", "Is the forecast model any good?", "Forecast 002230 for a year"]),
                       g("Smart money", ["national_team_research", "money_map", "national_team_etf", "market_leverage", "smart_money"],
                         ["What did the national team buy this quarter?", "Who holds 002230 among the big funds?"]),
                       g("Screen & scorecards", ["screen_stocks", "scan_market", "evidence_scorecard"],
@@ -935,6 +960,9 @@ PROMPTS = [
     ("team", "AI 投研团队：分析一只股票", "Five AI analysts, a bull/bear debate and a PM's view, logged and scored later", "ticker",
      "用 research_team 让 AI 投研团队分析 {x}：先说结论（观点、置信度、观察期）、观察计划和风险，说明置信度为什么是这个水平，"
      "引用证据编号；说明这次判断已记入前瞻日志、到期会打分。不是买卖建议。"),
+    ("forecast", "中长期预测：未来 3/6/12 个月", "3/6/12-month forecast with the model's track record", "ticker",
+     "用 long_term_forecast 预测 {x} 未来 3、6、12 个月相对大盘的表现：说出排名百分位、历史同档的平均超额收益，"
+     "以及这个模型有没有通过检验（扣成本后的真实成绩）；没通过就明说只能参考。不预测明天涨跌，不是投资建议。"),
     ("ntresearch", "跟着国家队做能赚钱吗", "Can acting on the national team make money?", None,
      "用 national_team_research 回答：跟着（或反着）国家队、社保、险资、北向的披露去买或回避，历史上能不能赚钱；ETF 托底之后大盘怎么走；"
      "下季度国家队最可能新进哪些股票、这种预测准不准、提前买赚不赚。先说结论，再给关键数字（和同月其他披露比的差、t 值、门槛），"
@@ -1227,6 +1255,14 @@ def build_server(tools: Tools):
         to the right stockproof tool and its arguments (rules first, LLM only if no rule fits). Returns next_tool and
         next_args; call that tool next. Use when unsure which tool fits."""
         return tools.ask(text, lang)
+
+    @srv.tool()
+    def long_term_forecast(ticker: str | None = None, refresh: bool = False, lang: str | None = None) -> dict:
+        """Medium/long-horizon forecast for A-shares: each stock's rank vs all stocks over the next 3, 6 and 12 months,
+        from valuation, profitability, growth, trend and volatility, refit monthly on past data only (walk-forward),
+        with the model's own out-of-sample record after costs and whether it passed. Use for "未来几个月 / 半年 /
+        一年会涨吗", "长期走势", "预测". Not daily direction; not advice."""
+        return tools.long_term_forecast(ticker, refresh, lang)
 
     @srv.tool()
     def national_team_research(refresh: bool = False, lang: str | None = None) -> dict:

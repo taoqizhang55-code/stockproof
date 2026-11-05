@@ -543,7 +543,7 @@ class Dashboard:
             if self.job["running"]:
                 return False, "busy"
             tickers = list(self.settings["watchlist"])
-            if kind in ("screen", "moneymap", "etf", "margin", "moneyhistory", "ntresearch"):
+            if kind in ("screen", "moneymap", "etf", "margin", "moneyhistory", "ntresearch", "forecast", "forecast_download"):
                 tickers = [kind]                      # whole market, independent of the watchlist
             elif not tickers:
                 return False, "empty"
@@ -569,6 +569,16 @@ class Dashboard:
                 with self.lock:
                     self.job["current"] = kind
                 margin.history(self.data_dir, 20, fetch=True)
+                with self.lock:
+                    self.job["done"] = 1
+                return
+            if kind in ("forecast", "forecast_download"):
+                from stockproof import forecast as fc
+                with self.lock:
+                    self.job["current"] = kind
+                if kind == "forecast_download":
+                    fc.download_prices(self.data_dir, log=self._log)
+                fc.run(self.data_dir, log=self._log)
                 with self.lock:
                     self.job["done"] = 1
                 return
@@ -816,6 +826,16 @@ def make_handler(app: Dashboard, port: int):
                     store = app._store()
                     team.score_calls(store, app.data_dir, fetch=False)
                     return self._send(200, _clean(team.track_record(store, self._lang(qs), limit=30)))
+                if url.path == "/api/forecast":
+                    from stockproof import forecast as fc
+                    res = fc.load(app.data_dir)
+                    if res is None:
+                        return self._send(200, {"need_run": True})
+                    tk = (qs.get("ticker") or [""])[0].upper()
+                    lang = self._lang(qs)
+                    return self._send(200, _clean({"made": res["made"], "universe": res.get("universe"),
+                                                   "summary": fc.summary_text(res, lang),
+                                                   "stock": fc.stock_view(res, tk, lang) if tk else None}))
                 if url.path == "/api/ntresearch":
                     from stockproof import nt_research
                     r = nt_research.load(app.data_dir)
@@ -1051,7 +1071,7 @@ def make_handler(app: Dashboard, port: int):
             if path == "/api/refresh":
                 kind = body.get("kind")
                 if kind not in ("news", "earnings", "research_us", "research_cn", "screen", "moneymap", "etf", "margin",
-                                "moneyhistory", "ntresearch"):
+                                "moneyhistory", "ntresearch", "forecast", "forecast_download"):
                     return self._send(400, {"error": "unknown refresh kind"})
                 ok, msg = app.start_refresh(kind)
                 return self._send(200 if ok else 409, {"ok": ok, "message": msg})

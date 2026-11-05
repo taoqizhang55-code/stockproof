@@ -714,6 +714,38 @@ def cmd_day(args) -> int:
     return 0
 
 
+def cmd_forecast(args) -> int:
+    """3 / 6 / 12-month forecasts against the average stock, each with the model's own out-of-sample record."""
+    from stockproof import forecast as fc
+    zh = args.lang == "zh"
+    if args.download:
+        print("下载全市场 A 股历史价格（雅虎财经，分批、可中断续传；第一次约 30–60 分钟）……" if zh else
+              "Downloading whole-market A-share prices (Yahoo, resumable batches; 30-60 min the first time) ...")
+        r = fc.download_prices(args.data_dir, log=print)
+        print(("完成：" if zh else "Done: ") + json.dumps(r, ensure_ascii=False))
+    res = fc.load(args.data_dir)
+    if res is None or args.refresh or args.download:
+        print("训练并检验中长期预测（逐月滚动，只用过去的数据）……" if zh else "Fitting and testing (walk-forward) ...")
+        res = fc.run(args.data_dir, log=print)
+    print(("中长期预测（" if zh else "Medium/long-horizon forecasts (") + res["made"] + "）")
+    for line in fc.summary_text(res, args.lang):
+        print("  · " + line)
+    for tk in args.tickers:
+        t = cn.canonical(tk) if cn.is_cn(tk) else tk.upper()
+        v = fc.stock_view(res, t, args.lang)
+        print()
+        if not v:
+            print(f"{t}: " + ("不在预测范围内（只做 A 股；下载全市场价格后范围更大：stockproof forecast --download）" if zh else
+                             "not covered (A-shares only; widen with `stockproof forecast --download`)"))
+            continue
+        print(f"{t} ({'截至' if zh else 'as of'} {v['as_of']})")
+        for h in v["horizons"]:
+            print("  " + h["text"])
+    print("  " + ("这是历史统计，不是投资建议；没通过检验的预测只能参考。" if zh else
+                  "Historical statistics, not advice; forecasts that failed their tests are context only."))
+    return 0
+
+
 def cmd_paper(args) -> int:
     """Paper trading: accounts, orders filled at later opens with pessimistic rules, NAV vs the market."""
     import json as _json
@@ -1486,6 +1518,14 @@ def build_parser() -> argparse.ArgumentParser:
     ak.add_argument("--base-url")
     ak.set_defaults(func=cmd_ask)
 
+    fo = sub.add_parser("forecast", help="3/6/12-month forecasts vs the average stock, with the model's track record")
+    fo.add_argument("tickers", nargs="*")
+    fo.add_argument("--download", action="store_true", help="first download whole-market A-share prices (30-60 min)")
+    fo.add_argument("--refresh", action="store_true", help="refit and retest")
+    fo.add_argument("--lang", default="zh", choices=["en", "zh"])
+    fo.add_argument("--data-dir", default=DATA_DIR)
+    fo.set_defaults(func=cmd_forecast)
+
     dy = sub.add_parser("day", help="what happened to a stock on one day: stockproof day 002230 2026-10-15")
     dy.add_argument("ticker")
     dy.add_argument("date")
@@ -1628,6 +1668,8 @@ MENU = {
                     ("daily", "更新关注列表并生成每日简报"),
                     ("calendar", "未来两周谁发财报"),
                     ("schedule --time 21:00", "每晚自动更新（Mac / Windows / Linux）")]),
+        ("中长期预测", [("forecast 600519", "未来 3/6/12 个月相对大盘的预测，附模型过去的真实成绩（是否通过检验）"),
+                     ("forecast --download", "先下载全市场价格，让预测和检验覆盖全部 A 股")]),
         ("跟着国家队做", [("moneymap --research", "检验：跟着/反着国家队、社保、险资的披露做能不能赚钱；ETF 托底；预测下季度新进")]),
         ("一句话与分享卡片", [('ask "茅台能买吗"', "一句话直接问：自动找到对应的功能（投研团队、为什么涨跌、资金地图、模拟盘……）"),
                         ("card team <记录编号>", "分享卡片：投研团队判断 / 模拟盘（card paper 账户名）/ 实验结果（card lab 实验编号）")]),
