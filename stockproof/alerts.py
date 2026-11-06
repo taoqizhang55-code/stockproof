@@ -211,6 +211,30 @@ def us_holidays(year: int) -> set[dt.date]:
     return out
 
 
+def hk_holidays(year: int) -> set[dt.date]:
+    """HKEX closures that follow fixed rules: New Year, Good Friday, Easter Monday,
+    Labour Day, HKSAR Day, National Day, Christmas and the first weekday after Christmas (a Sunday holiday moves
+    to Monday). Lunar-calendar closures (Lunar New Year, Ching Ming, Buddha's Birthday, Tuen Ng, Mid-Autumn,
+    Chung Yeung) are not included: on those days no new prices arrive, so no alerts fire."""
+    a = year % 19; b, c = divmod(year, 100); d_, e = divmod(b, 4); g = (8 * b + 13) // 25
+    h = (19 * a + b - d_ - g + 15) % 30; j, k = divmod(c, 4); m = (a + 11 * h) // 319
+    r = (2 * e + 2 * j - k - h + m + 32) % 7; month = (h - m + r + 90) // 25; day = (h - m + r + month + 19) % 32
+    easter = dt.date(year, month, day)
+
+    def sunday_moves(d):
+        return d + dt.timedelta(days=1) if d.weekday() == 6 else d
+    out = {sunday_moves(dt.date(year, 1, 1)), easter - dt.timedelta(days=2), easter + dt.timedelta(days=1),
+           sunday_moves(dt.date(year, 5, 1)), sunday_moves(dt.date(year, 7, 1)), sunday_moves(dt.date(year, 10, 1))}
+    xmas = dt.date(year, 12, 25)
+    if xmas.weekday() == 6:                               # Sunday: Mon 26 and Tue 27
+        out |= {dt.date(year, 12, 26), dt.date(year, 12, 27)}
+    elif xmas.weekday() == 5:                             # Saturday: Mon 27
+        out.add(dt.date(year, 12, 27))
+    else:
+        out |= {xmas, xmas + dt.timedelta(days=1)}                # a Saturday 26th is not moved
+    return {d for d in out if d.weekday() < 5}
+
+
 _CN_DAYS: set[dt.date] | None = None
 
 
@@ -247,6 +271,8 @@ def is_trading_day(market: str, day: dt.date, data_dir: str | None = None) -> bo
         return False
     if market == "us":
         return day not in us_holidays(day.year)
+    if market == "hk":
+        return day not in hk_holidays(day.year)
     if market == "cn":
         cal = cn_trading_days(data_dir)
         if cal and max(cal) >= day:
@@ -255,14 +281,25 @@ def is_trading_day(market: str, day: dt.date, data_dir: str | None = None) -> bo
 
 
 def market_open(now: dt.datetime | None = None, data_dir: str | None = None) -> dict:
-    """Which markets are in session right now: hours, weekends and holidays (A-share exchange calendar, NYSE rules)."""
+    """Which markets are in session right now: hours, weekends and holidays (A-share exchange calendar, NYSE and
+    HKEX rules)."""
     from zoneinfo import ZoneInfo
     now = now or dt.datetime.now(dt.timezone.utc)
     sh = now.astimezone(ZoneInfo("Asia/Shanghai"))
     ny = now.astimezone(ZoneInfo("America/New_York"))
-    t_sh, t_ny = sh.hour * 60 + sh.minute, ny.hour * 60 + ny.minute
+    t_sh, t_ny = sh.hour * 60 + sh.minute, ny.hour * 60 + ny.minute     # Hong Kong shares Shanghai's clock
     return {"cn": (570 <= t_sh <= 690 or 780 <= t_sh <= 900) and is_trading_day("cn", sh.date(), data_dir),
+            "hk": (570 <= t_sh <= 720 or 780 <= t_sh <= 960) and is_trading_day("hk", sh.date(), data_dir),
             "us": 570 <= t_ny <= 960 and is_trading_day("us", ny.date(), data_dir)}
+
+
+def market_of_ticker(ticker: str) -> str:
+    if not cn.is_cn(ticker):
+        return "us"
+    try:
+        return "hk" if cn.parse(ticker)["market"] == "HK" else "cn"
+    except (ValueError, KeyError, TypeError):
+        return "cn"
 
 
 def watch(app, store, interval: int = 60, once: bool = False, lang: str = "zh", log=print, notify: bool = True) -> list[dict]:
@@ -272,7 +309,7 @@ def watch(app, store, interval: int = 60, once: bool = False, lang: str = "zh", 
     while True:
         tks = watch_list(app, store)
         mo = market_open(data_dir=app.data_dir)
-        live_tk = [t for t in tks if mo["cn" if cn.is_cn(t) else "us"]]
+        live_tk = [t for t in tks if mo[market_of_ticker(t)]]
         live = live_prices(live_tk) if live_tk else {}
         new = check(store, app.data_dir, tks, live, lang)
         for a in new:

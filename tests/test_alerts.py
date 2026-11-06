@@ -53,7 +53,19 @@ def test_parse_sina():
 def test_market_open():
     import datetime as dt
     t = dt.datetime(2026, 11, 4, 2, 0, tzinfo=dt.timezone.utc)                # 10:00 Shanghai, Wednesday
-    assert alerts.market_open(t) == {"cn": True, "us": False}
+    assert alerts.market_open(t) == {"cn": True, "hk": True, "us": False}
+    t = dt.datetime(2026, 11, 4, 7, 30, tzinfo=dt.timezone.utc)               # 15:30: A-shares closed, HK open
+    assert alerts.market_open(t) == {"cn": False, "hk": True, "us": False}
+
+
+def test_hk_holidays():
+    import datetime as dt
+    h = alerts.hk_holidays(2026)
+    assert {dt.date(2026, 4, 3), dt.date(2026, 4, 6), dt.date(2026, 7, 1), dt.date(2026, 10, 1),
+            dt.date(2026, 12, 25)} <= h
+    assert alerts.market_of_ticker("00700") == "hk" and alerts.market_of_ticker("600519") == "cn" \
+        and alerts.market_of_ticker("AAPL") == "us"
+    assert not alerts.is_trading_day("hk", dt.date(2026, 12, 25))
 
 
 def test_us_holidays_and_cn_calendar(monkeypatch):

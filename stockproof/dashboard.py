@@ -1166,7 +1166,7 @@ def _watch_loop(app: Dashboard, interval: int = 60) -> None:
         try:
             if app.settings.get("live_alerts"):
                 mo = alerts.market_open(data_dir=app.data_dir)
-                if mo["cn"] or mo["us"]:
+                if any(mo.values()):
                     store = app._store()
                     lang = app.settings["lang"]
                     for a in alerts.watch(app, store, once=True, lang=lang, notify=False, log=lambda *x: None):
