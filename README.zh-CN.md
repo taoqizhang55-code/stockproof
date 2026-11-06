@@ -68,6 +68,9 @@ stockproof demo
 | **长期计划** | `plan` | 选一种风险偏好（A 股 + 债券 + 黄金 + 美股，或美元版），给出本月买什么、按估值高低调整金额、每年再平衡，并附 20 年历史回放（含 2007 年最高点等四个最差的起点）。 |
 | **分享卡片** | `card` | 把团队判断、模拟盘账户或实验室结果做成图片，战绩印在上面。 |
 
+<p align="center"><img src="https://raw.githubusercontent.com/taoqizhang55-code/stockproof/main/docs/images/stock_chart.png" width="48%" alt="K 线，点某一天"> <img src="https://raw.githubusercontent.com/taoqizhang55-code/stockproof/main/docs/images/moneymap.png" width="48%" alt="资金地图"></p>
+<p align="center"><img src="https://raw.githubusercontent.com/taoqizhang55-code/stockproof/main/docs/images/team.png" width="48%" alt="AI 投研团队"> <img src="https://raw.githubusercontent.com/taoqizhang55-code/stockproof/main/docs/images/paper.png" width="48%" alt="模拟盘"></p>
+
 所有功能都在一个本地网页看板里：`stockproof dashboard`。**首页**列出能做的事，例子点一下就能跑；**实验室**页用表单回测想法，不用写 JSON；**持仓体检**页体检你的持仓，填过的持仓下次自动填好。第一次在 DeepSeek Harness 里用 stockproof 时，DeepSeek 会在对话里列出全部功能，并推荐打开网页看板体验；之后问"你能做什么"、输入 `/stockproof` 选现成问题，或说"打开网页看板"都可以；说"打开网页看板的实验室页"可以直接跳到某一页。命令行直接输入 `stockproof` 会显示同样的分组菜单；在 DeepSeek Harness 里输入 `/` 可以选现成的问题（体检持仓、回测想法、为什么涨跌……）。
 
 ### 大模型自己做不到，装了 stockproof 就能做到

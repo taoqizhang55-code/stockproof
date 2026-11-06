@@ -827,6 +827,15 @@ def make_handler(app: Dashboard, port: int):
                                                    **(ht["results"].get(cat) or {})}
                         except (OSError, ValueError, KeyError):
                             pass
+                    try:                                            # the fair test: vs same-month disclosures
+                        from stockproof import nt_research
+                        sig = (nt_research.load(app.data_dir) or {})["signals"]
+                        rows = {r["action"]: r for r in sig["tests"] if r["kind"] == cat}
+                        if rows:
+                            res["matched_test"] = {"bar": sig["bar"], "n_tests": sig["n_tests"],
+                                                   "period": sig["period"], "rows": rows}
+                    except (OSError, ValueError, KeyError, TypeError):
+                        pass
                     res["categories"] = {k: v[0 if lang == "zh" else 1] for k, v in flows.LABEL.items()}
                     return self._send(200, res)
                 if url.path == "/api/margin":

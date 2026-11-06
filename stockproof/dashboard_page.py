@@ -71,9 +71,9 @@ h3 { font-size:15px; margin:18px 0 6px; }
 .price { display:flex; flex-wrap:wrap; align-items:center; gap:8px 18px; margin:6px 0 10px; }
 .price .close { font-size:22px; } .price .rets { display:flex; flex-wrap:wrap; gap:6px 14px; align-items:center; font-size:13px; }
 .move { display:flex; flex-wrap:wrap; align-items:center; gap:10px; padding:8px 12px; border-radius:10px; background:var(--neu-bg); }
-.tabs { display:flex; gap:4px; margin-top:16px; border-bottom:1px solid var(--line); }
+.tabs { display:flex; gap:4px; margin-top:16px; border-bottom:1px solid var(--line); flex-wrap:wrap; }
 .tabs button { border:none; background:none; color:var(--muted); font:inherit; font-weight:600; padding:8px 14px;
-               cursor:pointer; border-bottom:2px solid transparent; margin-bottom:-1px; }
+               cursor:pointer; border-bottom:2px solid transparent; margin-bottom:-1px; white-space:nowrap; flex-shrink:0; }
 .tabs button.on { color:var(--text); border-bottom-color:var(--accent); }
 .seg { display:inline-flex; }
 .seg button { border:1px solid var(--line); background:var(--card); color:var(--muted); padding:8px 12px; cursor:pointer; font:inherit; }
@@ -1143,11 +1143,19 @@ function renderMoney() {
     <div class="kv"><b>${esc(tr("d_mm_net"))}</b>${esc(yi(MM.net_value_change))}</div>
     ${MM.exit_counts ? `<div class="kv"><b>${esc(tr("d_mm_exits_k"))}</b>${(MM.exit_counts.inferred || 0) + (MM.exit_counts.possible || 0)}</div>
     <div class="kv"><b>${esc(tr("d_mm_inferred_k"))}</b>${esc(yi(MM.inferred_reduction))}</div>` : ""}</div>`;
-  const ht = MM.history_test;
-  if (ht && (ht.new || ht.add)) {
+  const mt = MM.matched_test, ht = MM.history_test;
+  if (mt) {
+    const lab = {new: "d_mm_new", add: "d_mm_add", reduce: "d_mm_reduce", exit: "d_nt_exit"};
+    const parts = ["new", "add", "reduce", "exit"].filter((k) => mt.rows[k] && mt.rows[k].diff != null).map((k) => {
+      const r = mt.rows[k];
+      return `${tr(lab[k])} ${pct1(r.diff)}（t=${r.t != null ? r.t.toFixed(1) : "—"}，${r.n}）`;
+    });
+    const good = Object.values(mt.rows).some((r) => r.passes);
+    h += `<div class="verdict ${good ? "passes" : "no_edge"}" style="margin:10px 0"><b>${esc(tr("d_mm_mt_title"))}</b><br>${esc(parts.join("；"))}<br><span class="note">${esc(tr(good ? "d_mm_mt_good" : "d_mm_mt_bad", {n: mt.n_tests, b: mt.bar.toFixed(2), d: mt.period[1]}))}</span></div>`;
+  } else if (ht && (ht.new || ht.add)) {
     const one = (k) => ht[k] ? `${tr("d_mm_" + k)}：${tr("d_mm_ht_one", {a: pct1(ht[k].ann), t: ht[k].t != null ? ht[k].t.toFixed(1) : "—", n: ht[k].events, b: pct1(ht[k].ann_2x)})}` : "";
     const good = [ht.new, ht.add].some((x) => x && x.ann > 0 && x.t >= 2);
-    h += `<div class="verdict ${good ? "passes" : "no_edge"}" style="margin:10px 0"><b>${esc(tr("d_mm_ht_title", {h: ht.hold_days}))}</b><br>${esc([one("new"), one("add")].filter(Boolean).join("；"))}<br><span class="note">${esc(tr(good ? "d_mm_ht_good" : "d_mm_ht_bad", {d: ht.holdout_start}))} ${esc(tr("d_nt_vs_index"))}</span></div>`;
+    h += `<div class="verdict ${good ? "passes" : "no_edge"}" style="margin:10px 0"><b>${esc(tr("d_mm_ht_title", {h: ht.hold_days}))}</b><br>${esc([one("new"), one("add")].filter(Boolean).join("；"))}<br><span class="note">${esc(tr(good ? "d_mm_ht_good" : "d_mm_ht_bad", {d: ht.holdout_start}))}</span></div>`;
   }
   if (mmCat === "national") h += `<div id="mm-etf"></div>`;
   const inds = MM.industries || [];

@@ -2,7 +2,7 @@
 
 import os as _os
 
-__version__ = "0.4.0"
+__version__ = "0.4.1"
 
 
 def compat_env() -> None:
