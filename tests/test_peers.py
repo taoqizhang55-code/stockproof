@@ -23,7 +23,7 @@ def _setup(tmp_path):
             {"code": "000568", "name": "泸州老窖", "industry": "酿酒行业"},
             {"code": "600809", "name": "山西汾酒", "industry": "酿酒行业"},
             {"code": "000001", "name": "平安银行", "industry": "银行"}]
-    (d / "cn" / "research_yjbb2_20260930.json").write_text(json.dumps(rows, ensure_ascii=False))
+    (d / "cn" / "research_yjbb2_20260930.json").write_text(json.dumps(rows, ensure_ascii=False), encoding="utf-8")
     lab._CACHE.clear()
     return str(d), days[-1].date().isoformat()
 

@@ -258,7 +258,7 @@ def cn_trading_days(data_dir: str | None = None, fetch: bool = True) -> set[dt.d
         df = cn._ak().tool_trade_date_hist_sina()
         days = sorted(pd.to_datetime(df["trade_date"]).dt.date)
         os.makedirs(os.path.dirname(p), exist_ok=True)
-        with open(p, "w") as f:
+        with open(p, "w", encoding="utf-8") as f:
             json.dump([d.isoformat() for d in days if d.year >= 2020], f)
         _CN_DAYS = set(days)
     except Exception:
