@@ -54,3 +54,14 @@ def test_market_open():
     import datetime as dt
     t = dt.datetime(2026, 11, 4, 2, 0, tzinfo=dt.timezone.utc)                # 10:00 Shanghai, Wednesday
     assert alerts.market_open(t) == {"cn": True, "us": False}
+
+
+def test_us_holidays_and_cn_calendar(monkeypatch):
+    import datetime as dt
+    h = alerts.us_holidays(2026)
+    assert dt.date(2026, 11, 26) in h and dt.date(2026, 4, 3) in h and dt.date(2026, 7, 3) in h   # Thanksgiving, Good Friday, July 4 observed
+    assert dt.date(2026, 11, 25) not in h
+    monkeypatch.setattr(alerts, "_CN_DAYS", {dt.date(2026, 10, 9)})
+    assert not alerts.is_trading_day("cn", dt.date(2026, 10, 1))      # National Day
+    t = dt.datetime(2026, 10, 1, 2, 0, tzinfo=dt.timezone.utc)          # 10:00 Shanghai, a Thursday holiday
+    assert alerts.market_open(t)["cn"] is False

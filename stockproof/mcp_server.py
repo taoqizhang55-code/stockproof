@@ -443,13 +443,16 @@ class Tools:
                  "append-only. Paper only, not a real order.")
         try:
             acct = paper.find_account(store, account) if account else None
-            if action in ("buy", "sell", "show", "gap", "from_team") and not acct:
+            if action in ("buy", "sell", "show", "gap", "from_team", "archive", "unarchive") and not acct:
                 return {"error": "no such paper account", "accounts": paper.accounts(store)}
             if action == "new":
                 aid = paper.create_account(store, name or ("模拟盘" if zh else "paper"), cash or 1_000_000)
                 return {"id": aid, "rules": rules}
+            if action in ("archive", "unarchive"):
+                paper.archive(store, acct["id"], action == "archive")
+                return {"ok": True, "account": acct["name"], "note": "Archiving hides the account; its records stay."}
             if action == "plan":
-                aid = paper.create_plan_account(store, self.app.data_dir, name if name in ("conservative", "balanced", "growth") else "balanced",
+                aid = paper.create_plan_account(store, self.app.data_dir, name if name in ("conservative", "balanced", "growth", "us_conservative", "us_balanced", "us_growth") else "balanced",
                                                 cash or 1_000_000, None, self._lang(lang))
                 paper.step_plan(store, self.app.data_dir, aid)
                 return {"id": aid, "account": paper.account(store, aid), "rules": rules}
@@ -488,7 +491,7 @@ class Tools:
                 st["orders"] = st["orders"][-20:]
                 return self._clean(st)
             out = []
-            for a in paper.accounts(store):
+            for a in paper.accounts(store, include_archived=False):
                 st = paper.state(store, self.app.data_dir, a["id"])
                 out.append({k: st.get(k) for k in ("value", "return", "benchmark_return", "excess", "max_drawdown", "pending")}
                            | {"id": a["id"], "name": a["name"], "kind": a["kind"], "start_day": a["start_day"], "note": a["note"]})
@@ -505,8 +508,8 @@ class Tools:
         return self._clean({"new": new, "recent": alerts.recent(store, 20), "watching": alerts.watch_list(self.app, store),
                             "market_open": alerts.market_open(),
                             "note": (alerts.NOT_ORDER if lang == "zh" else alerts.NOT_ORDER_EN)
-                            + (" 持续盯盘：在终端运行 stockproof alerts --watch。" if lang == "zh" else
-                               " For continuous watching run `stockproof alerts --watch`.")})
+                            + (" 持续盯盘：看板“模拟盘与长期计划”页勾选“看板开着时自动盯盘”，或在终端运行 stockproof alerts --watch。" if lang == "zh" else
+                               " For continuous watching tick 'Watch live' on the dashboard's Paper page, or run `stockproof alerts --watch`.")})
 
     TOOL_FOR = {"plan": "long_term_plan", "forecast": "long_term_forecast", "nt_research": "national_team_research", "day": "day_detail", "team": "research_team", "team_record": "team_track_record", "why": "why_did_it_move",
                 "technical": "technical_analysis", "smart_money": "smart_money", "moneymap": "money_map",
@@ -552,10 +555,13 @@ class Tools:
 
     def long_term_forecast(self, ticker: str | None = None, refresh: bool = False, lang: str | None = None) -> dict:
         from stockproof import forecast as fc
-        res = fc.load(self.app.data_dir)
+        mkt = fc.market_of(self._tk(ticker)) if ticker else "cn"
+        if mkt == "hk":
+            return {"error": "Hong Kong isn't covered by the forecaster yet"}
+        res = fc.load(self.app.data_dir, mkt)
         if res is None or refresh:
             try:
-                res = fc.run(self.app.data_dir, log=lambda *a: None)
+                res = fc.run(self.app.data_dir, log=lambda *a: None, market=mkt)
             except Exception as e:
                 return {"error": f"{type(e).__name__}: {str(e)[:200]}"}
         lang = self._lang(lang)
@@ -567,8 +573,10 @@ class Tools:
                        "prediction. Whole-market prices: `stockproof forecast --download`. Not advice."}
         if ticker:
             out["stock"] = fc.stock_view(res, self._tk(ticker), lang)
-        if res.get("universe") != "all":
+        if res.get("universe") == "csi300":
             out["warning"] = "Only today's CSI 300 members are covered (survivorship); suggest `stockproof forecast --download`."
+        elif res.get("universe") == "sp500":
+            out["warning"] = "US: today's S&P 500 members and price features only (survivorship)."
         return self._clean(out)
 
     def national_team_research(self, refresh: bool = False, lang: str | None = None) -> dict:
@@ -1295,7 +1303,8 @@ def build_server(tools: Tools):
     def long_term_plan(profile: str = "balanced", monthly_amount: float = 3000.0, holdings: dict | None = None,
                        lang: str | None = None) -> dict:
         """Long-term investment plan (长期投资/定投/资产配置): A-shares (CSI 300/500 ETFs), government bonds, gold and
-        S&P 500, profiles conservative / balanced / growth. Returns each mix's history since 2005 from several start
+        S&P 500, profiles conservative / balanced / growth; for a US dollar account us_conservative / us_balanced /
+        us_growth (VTI, EFA, FXI, AGG, GLD). Returns each mix's history since 2005 from several start
         dates (incl. the 2007 and 2015 tops), worst year, max drawdown, monthly-buying returns with and without the
         valuation tilt, and this month's buys (A-share part scaled by how cheap A-shares are; rebalance warning
         from `holdings` = {asset: amount}, assets hs300/zz500/bond/gold/spx). No forecasting; not advice."""

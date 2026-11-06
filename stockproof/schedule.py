@@ -317,6 +317,10 @@ def daily(data_dir: str, provider: str, model: str | None, base_url: str | None,
         if fr and (dt.date.today() - dt.date.fromisoformat(fr["made"])).days >= 28:
             fc.update_prices(data_dir, log=lambda *a: None)
             fc.run(data_dir, log=lambda *a: None)
+            try:
+                fc.run(data_dir, log=lambda *a: None, market="us")
+            except Exception:
+                pass
             print("forecast: refit", flush=True)
     except Exception as e:
         print(f"forecast refit skipped: {type(e).__name__}: {e}", flush=True)

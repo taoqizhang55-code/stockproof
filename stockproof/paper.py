@@ -25,7 +25,19 @@ import numpy as np
 import pandas as pd
 
 from stockproof import cn, quotes
-from stockproof.backtest import COSTS, price_limit
+from stockproof.backtest import COSTS as _BT_COSTS, Costs, price_limit
+
+# Hong Kong: stamp duty 0.1% on both sides plus exchange fees, folded into the per-side commission; no price limits.
+COSTS = {**_BT_COSTS, "hk": Costs(commission=0.0013, slippage=0.001, stamp_duty=0.0, stamp_duty_cut=None,
+                                  stamp_duty_after=0.0)}
+SAMPLE = {"cn": "600000.SH", "hk": "00700.HK", "us": "AAPL"}
+BENCH_KEY = {"cn": "A", "hk": "HK", "us": "US"}
+BENCH_NAME = {"cn": "沪深300", "hk": "恒生指数", "us": "S&P 500"}
+
+
+def market_of(ticker: str) -> str:
+    p = cn.parse(ticker)
+    return "us" if not p else "hk" if p["market"] == "HK" else "cn"
 
 MAX_WAIT = 5            # trading days an order waits for a fillable open
 VOLUME_CAP = 0.05       # share of the day's volume one order may take
@@ -66,6 +78,7 @@ def market_day(ticker: str, now: dt.datetime | None = None) -> str:
 
 
 def lot(ticker: str) -> int:
+    """A-shares trade in lots of 100. Hong Kong lots differ by stock (100 to 2,000+); 100 is assumed."""
     return 100 if cn.is_cn(ticker) else 1
 
 
@@ -74,7 +87,9 @@ def create_account(store, name: str, cash: float = 1_000_000.0, market: str = "c
                    spec: dict | None = None, note: str = "", start_day: str | None = None) -> str:
     _init(store)
     aid = uuid.uuid4().hex[:8]
-    start_day = start_day or market_day("600000.SH" if market == "cn" else "AAPL")
+    if market not in SAMPLE:
+        raise ValueError("market must be cn, hk or us")
+    start_day = start_day or market_day(SAMPLE[market])
     store.conn.execute("INSERT INTO paper_accounts VALUES (?,?,?,?,?,?,?,?,?)",
                        (aid, str(name)[:60], dt.datetime.now().isoformat(timespec="seconds"), start_day, float(cash),
                         market, kind, json.dumps(spec, ensure_ascii=False) if spec else None, str(note)[:300]))
@@ -82,15 +97,34 @@ def create_account(store, name: str, cash: float = 1_000_000.0, market: str = "c
     return aid
 
 
-def accounts(store) -> list[dict]:
+def archived(store) -> set[str]:
+    """Accounts hidden from lists (their records stay: archiving is itself an appended mark)."""
+    _init(store)
+    state_ = {}
+    for aid, kind in store.conn.execute("SELECT account, kind FROM paper_marks WHERE kind IN ('archive','unarchive') "
+                                        "ORDER BY rowid"):
+        state_[aid] = kind == "archive"
+    return {a for a, v in state_.items() if v}
+
+
+def archive(store, aid: str, on: bool = True) -> None:
+    _init(store)
+    store.conn.execute("INSERT INTO paper_marks VALUES (?,?,?,?)",
+                       (aid, dt.date.today().isoformat(), "archive" if on else "unarchive", ""))
+    store.conn.commit()
+
+
+def accounts(store, include_archived: bool = True) -> list[dict]:
     _init(store)
     cur = store.conn.execute("SELECT id, name, created_at, start_day, cash, market, kind, spec, note FROM paper_accounts "
                              "ORDER BY created_at")
     cols = [c[0] for c in cur.description]
     out = [dict(zip(cols, r)) for r in cur.fetchall()]
+    hidden = archived(store)
     for a in out:
         a["spec"] = json.loads(a["spec"]) if a["spec"] else None
-    return out
+        a["archived"] = a["id"] in hidden
+    return out if include_archived else [a for a in out if not a["archived"]]
 
 
 def account(store, aid: str) -> dict | None:
@@ -103,10 +137,12 @@ def place(store, aid: str, ticker: str, side: str, shares: int = 0, value: float
     _init(store)
     if side not in ("buy", "sell"):
         raise ValueError("side must be buy or sell")
-    if not account(store, aid):
+    acct = account(store, aid)
+    if not acct:
         raise ValueError("no such paper account")
-    if cn.is_cn(ticker) and cn.parse(ticker)["market"] == "HK":
-        raise ValueError("Hong Kong stocks are not supported in paper trading yet")
+    if market_of(ticker) != acct["market"]:
+        raise ValueError(f"{ticker} trades in another market than this account ({acct['market']}): "
+                         "open an account for that market")
     lt = lot(ticker)
     shares = int(shares) // lt * lt if shares else 0
     if not shares and not value and side == "buy":
@@ -140,7 +176,7 @@ def _bars(data_dir: str, ticker: str, fetch: bool) -> pd.DataFrame:
 
 
 def _calendar(data_dir: str, market: str, fetch: bool) -> pd.DatetimeIndex:
-    bm = quotes.BENCH["A" if market == "cn" else "US"]
+    bm = quotes.BENCH[BENCH_KEY[market]]
     s = quotes.load(data_dir, bm)
     if fetch:
         try:
@@ -193,7 +229,7 @@ def process(store, data_dir: str, fetch: bool = True, log=print) -> dict:
             b = bars_cache[o.ticker] = _bars(data_dir, o.ticker, fetch)
         placed = pd.Timestamp(o.created_day)
         window = cal[cal > placed][:MAX_WAIT]                      # the trading days it may fill on
-        costs = COSTS["cn" if cn.is_cn(o.ticker) else "us"]
+        costs = COSTS[market_of(o.ticker)]
         outcome = None
         last_bar = b.index.max() if len(b) else None
         window = window[window <= last_bar] if last_bar is not None else window[:0]   # days we have data for
@@ -210,7 +246,7 @@ def process(store, data_dir: str, fetch: bool = True, log=print) -> dict:
                 if o.side == "sell" and op <= prev_close * (1 - lim) * 1.003:
                     continue                                       # opened at limit-down: can't sell
             vol = b.at[d, "volume"] if "volume" in b and pd.notna(b.at[d, "volume"]) else None
-            vol_shares = None if vol is None else float(vol) * (100 if cn.is_cn(o.ticker) else 1)   # lots -> shares
+            vol_shares = None if vol is None else float(vol) * (100 if market_of(o.ticker) == "cn" else 1)   # lots -> shares
             fills = _fills_frame(store, o.account)
             lt = lot(o.ticker)
             if o.side == "sell":
@@ -226,7 +262,7 @@ def process(store, data_dir: str, fetch: bool = True, log=print) -> dict:
             px = op * (1 + costs.slippage + impact) if o.side == "buy" else op * (1 - costs.slippage - impact)
             if o.side == "buy":
                 cash = _cash_before(acct, fills, d)
-                fee = lambda k: max(MIN_COMMISSION if cn.is_cn(o.ticker) else 0.0, k * px * costs.commission)
+                fee = lambda k: max(MIN_COMMISSION if market_of(o.ticker) == "cn" else 0.0, k * px * costs.commission)
                 while n > 0 and n * px + fee(n) > cash:
                     n -= lt
                 if n < int(o.shares or want):
@@ -237,7 +273,7 @@ def process(store, data_dir: str, fetch: bool = True, log=print) -> dict:
                 outcome = ("cancelled", d, None, 0, 0.0, 0.0, why)
                 break
             gross = n * px
-            commission = max(MIN_COMMISSION if cn.is_cn(o.ticker) else 0.0, gross * costs.commission)
+            commission = max(MIN_COMMISSION if market_of(o.ticker) == "cn" else 0.0, gross * costs.commission)
             duty = gross * (costs.sell(d) - costs.commission - costs.slippage) if o.side == "sell" else 0.0
             outcome = ("filled", d, round(px, 4), n, gross, commission + max(duty, 0.0), reason)
             break
@@ -278,7 +314,7 @@ def state(store, data_dir: str, aid: str, fetch: bool = False) -> dict:
             pos.loc[pos.index >= d, r.ticker] += sign * r.filled
         cash.loc[cash.index >= d] += -(r.gross + r.cost) if r.side == "buy" else (r.gross - r.cost)
     value = cash + (pos * closes).sum(axis=1) if tickers else cash
-    bm = quotes.load(data_dir, quotes.BENCH["A" if acct["market"] == "cn" else "US"])
+    bm = quotes.load(data_dir, quotes.BENCH[BENCH_KEY[acct["market"]]])
     bm = bm[~bm.index.duplicated()].reindex(days).ffill() if len(bm) else pd.Series(np.nan, index=days)
     nav = value / acct["cash"]
     bnav = bm / bm.dropna().iloc[0] if bm.notna().any() else pd.Series(np.nan, index=days)
@@ -363,7 +399,7 @@ def step_strategy(store, data_dir: str, aid: str, events: pd.DataFrame | None = 
     ev = strategy_events(data_dir, spec, log) if events is None else events
     od = orders(store, aid)
     seen = set(od["source"])
-    today = market_day("600000.SH" if acct["market"] == "cn" else "AAPL", now)
+    today = market_day(SAMPLE[acct["market"]], now)
     ev = ev[(pd.to_datetime(ev["day0"]) >= pd.Timestamp(acct["start_day"])) & (pd.to_datetime(ev["day0"]) <= pd.Timestamp(today))]
     filled = od[(od["status"] == "filled")]
     buys = filled[filled["side"] == "buy"]
@@ -523,13 +559,14 @@ def create_plan_account(store, data_dir: str, profile: str = "balanced", cash: f
     from stockproof import plan
     p = plan.PROFILES[profile]
     zh = lang == "zh"
+    mkt = "us" if p.get("currency") == "usd" else "cn"
     spec = {"type": "plan", "profile": profile, "weights": {plan.ASSETS[a]["etf"]: w for a, w in p["w"].items()},
-            "rebalance": 252, "market": "cn"}
+            "rebalance": 252, "market": mkt}
     parts = "、".join(f"{plan.ASSETS[a]['etf_name']} {100 * w:.0f}%" for a, w in p["w"].items())
     note = (f"长期计划（{p['zh']}）：{parts}；每年再平衡" if zh else
             f"Long-term plan ({profile}): " + ", ".join(f"{plan.ASSETS[a]['etf']} {100 * w:.0f}%" for a, w in p["w"].items())
             + "; rebalanced yearly")
-    return create_account(store, name or (f"长期计划（{p['zh']}）" if zh else f"Long-term plan ({profile})"), cash, "cn",
+    return create_account(store, name or (f"长期计划（{p['zh']}）" if zh else f"Long-term plan ({profile})"), cash, mkt,
                           "plan", spec, note=note, start_day=start_day)
 
 
@@ -539,8 +576,8 @@ def step_plan(store, data_dir: str, aid: str, now: dt.datetime | None = None, fe
     acct = account(store, aid)
     spec = acct["spec"]
     _init(store)
-    today = market_day("600000.SH", now)
-    cal = _calendar(data_dir, "cn", fetch)
+    today = market_day(SAMPLE[acct["market"]], now)
+    cal = _calendar(data_dir, acct["market"], fetch)
     mk = store.conn.execute("SELECT day FROM paper_marks WHERE account=? AND kind='rebalance' ORDER BY day DESC LIMIT 1",
                             (aid,)).fetchone()
     if mk and int(((cal > pd.Timestamp(mk[0])) & (cal <= pd.Timestamp(today))).sum()) < spec["rebalance"]:
@@ -550,7 +587,7 @@ def step_plan(store, data_dir: str, aid: str, now: dt.datetime | None = None, fe
         return {"rebalance": False, "waiting": int(od["status"].isna().sum())}
     s = state(store, data_dir, aid)
     tot = s["value"]
-    held = {h["ticker"][:6]: h for h in s["holdings"]}
+    held = {(h["ticker"][:6] if acct["market"] == "cn" else h["ticker"]): h for h in s["holdings"]}
     key = f"rebalance:{today}"
     trades = []
     for code, w in spec["weights"].items():                       # sells first, so their cash funds the buys
@@ -558,7 +595,7 @@ def step_plan(store, data_dir: str, aid: str, now: dt.datetime | None = None, fe
         if h and h.get("price"):
             over = (h["value"] or 0) - tot * w
             if over > 0.02 * tot:
-                n = int(over / h["price"] // 100 * 100)
+                n = int(over / h["price"] // lot(h["ticker"]) * lot(h["ticker"]))
                 if n:
                     place(store, aid, h["ticker"], "sell", shares=n, source=key, note="above target weight", now=now)
                     trades.append((code, "sell", n))
@@ -566,7 +603,8 @@ def step_plan(store, data_dir: str, aid: str, now: dt.datetime | None = None, fe
         h = held.get(code)
         under = tot * w - ((h or {}).get("value") or 0)
         if under > 0.02 * tot or not h:
-            place(store, aid, cn.canonical(code), "buy", value=under, source=key, note="below target weight", now=now)
+            place(store, aid, cn.canonical(code) if acct["market"] == "cn" else code, "buy", value=under, source=key,
+                  note="below target weight", now=now)
             trades.append((code, "buy", round(under)))
     store.conn.execute("INSERT INTO paper_marks VALUES (?,?,?,?)", (aid, today, "rebalance", json.dumps(trades)))
     store.conn.commit()

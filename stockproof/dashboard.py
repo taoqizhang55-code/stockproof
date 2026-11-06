@@ -256,12 +256,13 @@ class Dashboard:
         from stockproof import paper
         store = self._store()
         accts = []
-        for a in paper.accounts(store):
+        for a in paper.accounts(store, include_archived=self.settings.get("show_archived", False) or bool(aid)):
             st = paper.state(store, self.data_dir, a["id"])
             accts.append({k: st.get(k) for k in ("value", "return", "benchmark_return", "excess", "max_drawdown", "as_of",
                                                  "pending", "cancelled")} | {"id": a["id"], "name": a["name"],
                                                                              "kind": a["kind"], "note": a["note"],
-                                                                             "start_day": a["start_day"], "market": a["market"]})
+                                                                             "start_day": a["start_day"], "market": a["market"],
+                                                                             "archived": a["archived"]})
         out = {"accounts": accts}
         if aid:
             out["detail"] = paper.state(store, self.data_dir, aid)
@@ -276,13 +277,24 @@ class Dashboard:
         zh = self.settings["lang"] == "zh"
         if act == "new":
             aid = paper.create_account(store, str(body.get("name") or ("模拟盘" if zh else "paper"))[:60],
-                                       float(body.get("cash") or 1_000_000), body.get("market") if body.get("market") in ("cn", "us") else "cn")
+                                       float(body.get("cash") or 1_000_000),
+                                       body.get("market") if body.get("market") in ("cn", "hk", "us") else "cn")
             return {"id": aid}
         if act == "strategy":
             spec = paper.spec_from_experiment(self.data_dir, str(body.get("exp_id"))) if body.get("exp_id") else body.get("spec")
             aid = paper.create_strategy_account(store, self.data_dir, spec, float(body.get("cash") or 1_000_000),
                                                 body.get("name"), self.settings["lang"])
             return {"id": aid}
+        if act in ("archive", "unarchive"):
+            paper.archive(store, str(body.get("account")), act == "archive")
+            return {"id": body.get("account")}
+        if act == "live_alerts":
+            self.settings["live_alerts"] = bool(body.get("on"))
+            self.save_settings()
+            return {"on": self.settings["live_alerts"]}
+        if act == "show_archived":
+            self.settings["show_archived"] = bool(body.get("on"))
+            return {"ok": True}
         if act == "plan":
             prof = str(body.get("profile") or "balanced")
             aid = paper.create_plan_account(store, self.data_dir, prof, float(body.get("cash") or 1_000_000),
@@ -322,6 +334,7 @@ class Dashboard:
         store = self._store()
         new = alerts.watch(self, store, once=True, lang=lang, notify=False, log=lambda *a: None) if not self.demo else []
         return _clean({"new": new, "recent": alerts.recent(store, 50), "watching": alerts.watch_list(self, store),
+                       "live": bool(self.settings.get("live_alerts")),
                        "open": alerts.market_open(), "note": alerts.NOT_ORDER if lang == "zh" else alerts.NOT_ORDER_EN})
 
     def research_team(self, tk: str, lang: str, force: bool = False, question: str | None = None) -> dict:
@@ -591,6 +604,10 @@ class Dashboard:
                 if kind == "forecast_download":
                     fc.download_prices(self.data_dir, log=self._log)
                 fc.run(self.data_dir, log=self._log)
+                try:
+                    fc.run(self.data_dir, log=self._log, market="us")      # if US research prices exist
+                except Exception:
+                    pass
                 with self.lock:
                     self.job["done"] = 1
                 return
@@ -832,7 +849,8 @@ def make_handler(app: Dashboard, port: int):
                     return self._send(200, app.paper_overview((qs.get("id") or [None])[0]))
                 if url.path == "/api/pxalerts":
                     from stockproof import alerts
-                    return self._send(200, _clean({"recent": alerts.recent(app._store(), 50)}))
+                    return self._send(200, _clean({"recent": alerts.recent(app._store(), 50),
+                                                   "live": bool(app.settings.get("live_alerts"))}))
                 if url.path == "/api/team/record":
                     from stockproof import team
                     store = app._store()
@@ -865,10 +883,10 @@ def make_handler(app: Dashboard, port: int):
                                                    "month": month, "assets": plan.ASSETS, "starts": plan.STARTS}))
                 if url.path == "/api/forecast":
                     from stockproof import forecast as fc
-                    res = fc.load(app.data_dir)
+                    tk = (qs.get("ticker") or [""])[0].upper()
+                    res = fc.load(app.data_dir, fc.market_of(tk) if tk else "cn")
                     if res is None:
                         return self._send(200, {"need_run": True})
-                    tk = (qs.get("ticker") or [""])[0].upper()
                     lang = self._lang(qs)
                     return self._send(200, _clean({"made": res["made"], "universe": res.get("universe"),
                                                    "summary": fc.summary_text(res, lang),
@@ -1130,6 +1148,25 @@ def bind(app: Dashboard, port: int, tries: int = 20):
 CODE_STAMP = 0                  # set when the server starts: which code this process is running
 
 
+def _watch_loop(app: Dashboard, interval: int = 60) -> None:
+    """While the dashboard runs and live alerts are switched on: check live prices every minute during the
+    session and show new alerts as desktop notifications (same as `stockproof alerts --watch`)."""
+    import time
+    from stockproof import alerts, digest
+    while True:
+        try:
+            if app.settings.get("live_alerts"):
+                mo = alerts.market_open(data_dir=app.data_dir)
+                if mo["cn"] or mo["us"]:
+                    store = app._store()
+                    lang = app.settings["lang"]
+                    for a in alerts.watch(app, store, once=True, lang=lang, notify=False, log=lambda *x: None):
+                        digest.notify("stockproof", a["text"] + " " + (alerts.NOT_ORDER if lang == "zh" else alerts.NOT_ORDER_EN))
+        except Exception:
+            pass
+        time.sleep(interval)
+
+
 def serve(app: Dashboard, port: int = 8765, open_browser: bool = True) -> None:
     global CODE_STAMP
     CODE_STAMP = code_stamp()
@@ -1141,6 +1178,8 @@ def serve(app: Dashboard, port: int = 8765, open_browser: bool = True) -> None:
     print(f"stockproof dashboard running at {url}  (press Ctrl+C to stop)")
     if open_browser:
         threading.Timer(0.6, lambda: webbrowser.open(url)).start()
+    if not app.demo:
+        threading.Thread(target=_watch_loop, args=(app,), daemon=True).start()
     try:
         server.serve_forever()
     except KeyboardInterrupt:

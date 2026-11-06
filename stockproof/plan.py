@@ -26,12 +26,23 @@ ASSETS = {
     "bond": {"name": "国债", "en": "Treasuries", "secid": "1.000012", "etf": "511010", "etf_name": "国债ETF", "a": False},
     "gold": {"name": "黄金", "en": "Gold", "secid": "118.AU9999", "etf": "518880", "etf_name": "黄金ETF", "a": False},
     "spx": {"name": "标普500", "en": "S&P 500", "secid": "100.SPX", "etf": "513500", "etf_name": "标普500ETF（QDII）", "a": False},
+    # US-listed ETFs for a dollar account (prices adjusted for dividends)
+    "vti": {"name": "美国全市场", "en": "US total market", "secid": "107.VTI", "fqt": "1", "etf": "VTI", "etf_name": "Vanguard VTI", "a": False},
+    "efa": {"name": "美国以外发达市场", "en": "Developed ex-US", "secid": "107.EFA", "fqt": "1", "etf": "EFA", "etf_name": "iShares EFA", "a": False},
+    "agg": {"name": "美国债券", "en": "US bonds", "secid": "107.AGG", "fqt": "1", "etf": "AGG", "etf_name": "iShares AGG", "a": False},
+    "gld": {"name": "黄金（美元）", "en": "Gold (USD)", "secid": "107.GLD", "fqt": "1", "etf": "GLD", "etf_name": "SPDR GLD", "a": False},
+    "fxi": {"name": "中国大盘股（美元）", "en": "China large caps (USD)", "secid": "107.FXI", "fqt": "1", "etf": "FXI", "etf_name": "iShares FXI", "a": False},
 }
 PROFILES = {
     "conservative": {"zh": "稳健", "w": {"hs300": 0.20, "bond": 0.50, "gold": 0.15, "spx": 0.15}},
     "balanced": {"zh": "平衡", "w": {"hs300": 0.125, "zz500": 0.125, "bond": 0.25, "gold": 0.25, "spx": 0.25}},
     "growth": {"zh": "进取", "w": {"hs300": 0.20, "zz500": 0.20, "bond": 0.15, "gold": 0.15, "spx": 0.30}},
     "a_only": {"zh": "只买沪深300（对照）", "w": {"hs300": 1.0}},
+    # in dollars, for an account in the US
+    "us_conservative": {"zh": "美元·稳健", "w": {"vti": 0.25, "efa": 0.10, "agg": 0.50, "gld": 0.15}, "currency": "usd"},
+    "us_balanced": {"zh": "美元·平衡", "w": {"vti": 0.35, "efa": 0.15, "fxi": 0.05, "agg": 0.30, "gld": 0.15}, "currency": "usd"},
+    "us_growth": {"zh": "美元·进取", "w": {"vti": 0.55, "efa": 0.20, "fxi": 0.05, "agg": 0.10, "gld": 0.10}, "currency": "usd"},
+    "us_only": {"zh": "只买美国全市场（对照）", "w": {"vti": 1.0}, "currency": "usd"},
 }
 STARTS = ["2005-01", "2007-10", "2015-06", "2018-01"]
 CASH_RATE = 0.02
@@ -45,10 +56,10 @@ def _dir(data_dir: str) -> str:
 
 
 # ---------------------------------------------------------------- data
-def _fetch(secid: str) -> pd.Series:
+def _fetch(secid: str, fqt: str = "0") -> pd.Series:
     import requests
     r = requests.get("https://push2his.eastmoney.com/api/qt/stock/kline/get",
-                     params={"secid": secid, "klt": "103", "fqt": "0", "beg": "20050101", "end": "20500101",
+                     params={"secid": secid, "klt": "103", "fqt": fqt, "beg": "20050101", "end": "20500101",
                              "fields1": "f1", "fields2": "f51,f53"},
                      headers={"User-Agent": "Mozilla/5.0", "Referer": "https://quote.eastmoney.com/"}, timeout=20)
     k = (r.json().get("data") or {}).get("klines") or []
@@ -63,6 +74,8 @@ AK_FALLBACK = {"hs300": ("index", "sh000300"), "zz500": ("index", "sh000905"), "
 def _fetch_ak(asset: str) -> pd.Series:
     """Same series from AKShare (Sina / SGE) when Eastmoney refuses."""
     from stockproof import cn
+    if asset not in AK_FALLBACK:
+        raise KeyError(asset)
     kind, sym = AK_FALLBACK[asset]
     ak = cn._ak()
     if kind == "index":
@@ -86,12 +99,13 @@ def monthly(data_dir: str, fetch: bool = True) -> pd.DataFrame:
     if os.path.exists(p) and (not fetch or dt.date.fromtimestamp(os.path.getmtime(p)) >= dt.date.today()):
         df = pd.read_csv(p, index_col=0)
         df.index = pd.PeriodIndex(df.index, freq="M")
-        return df
+        if not fetch or set(ASSETS) <= set(df.columns):
+            return df
     if not fetch:
         return pd.DataFrame()
     cols = {}
     for a, x in ASSETS.items():
-        for get in (lambda: _fetch(x["secid"]), lambda: _fetch_ak(a)):
+        for get in (lambda: _fetch(x["secid"], x.get("fqt", "0")), lambda: _fetch_ak(a)):
             try:
                 s = get()
                 if len(s) > 24:
@@ -249,20 +263,33 @@ def this_month(data_dir: str, profile: str, amount: float, holdings: dict | None
     rebalance = [r for r in rows if r["drift"] is not None and abs(r["drift"]) >= 0.05]
     pos = ("便宜" if pct is not None and pct <= 0.3 else "偏贵" if pct is not None and pct >= 0.7 else "中等") if zh else \
           ("cheap" if pct is not None and pct <= 0.3 else "expensive" if pct is not None and pct >= 0.7 else "middle")
+    usd = PROFILES[profile].get("currency") == "usd"
+    reb_zh = "有资产偏离目标 5 个百分点以上，建议这次再平衡。" if rebalance else ""
+    reb_en = " Some weights are 5+ points off target: rebalance this time." if rebalance else ""
+    if not a_assets:
+        note = ("每月按目标比例买入，偏离 5 个百分点以上就再平衡。" + reb_zh) if zh else \
+               ("Buy at target weights every month; rebalance when a weight is 5+ points off." + reb_en)
+    elif zh:
+        note = (f"A 股现在处在过去 5 年价格的第 {100 * (pct or 0):.0f} 百分位（{pos}），这个月 A 股部分投入正常额度的 {m:.2f} 倍"
+                + (f"，少投的 {held_back:,.0f} 先留作现金，等便宜时再投" if held_back > 0 else "")
+                + (f"，多出的 {extra:,.0f} 用之前留下的现金（没有就按正常额度买）" if extra > 0 else "") + "。" + reb_zh)
+    else:
+        note = (f"A-shares sit at the {100 * (pct or 0):.0f}th percentile of their last 5 years ({pos}): the A-share part "
+                f"gets {m:.2f}x its normal amount" + (f"; {held_back:,.0f} is kept as cash for cheaper times" if held_back > 0 else "")
+                + "." + reb_en)
+    if usd:
+        caveats = ("美元 ETF 的历史价格已按分红复权，以美元计，没扣基金费用（VTI、AGG 等费率很低）；黄金过去 20 年表现特别好，"
+                   "未来不一定一样。不是投资建议。") if zh else \
+                  "US ETF history is dividend-adjusted, in dollars, before (low) fund fees; gold had an unusually good 20 years. Not advice."
+    else:
+        caveats = ("历史成绩用的是价格指数（不含分红，国债指数含利息）、美股按美元计算、没扣基金费用；"
+                   "黄金和美股是过去 20 年表现最好的两类资产，未来不一定一样。不是投资建议。") if zh else \
+                  ("History uses price indices (no dividends; the bond index includes coupons), US in dollars, no "
+                   "fund fees; gold and US stocks had an unusually good 20 years. Not advice.")
     return {"profile": profile, "profile_name": PROFILES[profile]["zh"], "amount": amount, "rows": rows,
-            "a_share_position": pct, "a_share_label": pos, "a_multiplier": m, "held_back": round(held_back, 2), "extra_from_cash": round(extra, 2),
-            "rebalance": rebalance, "as_of": str(px.index[-1]),
-            "note": (f"A 股现在处在过去 5 年价格的第 {100 * (pct or 0):.0f} 百分位（{pos}），这个月 A 股部分投入正常额度的 {m:.2f} 倍"
-                     + (f"，少投的 {held_back:,.0f} 先留作现金，等便宜时再投" if held_back > 0 else "")
-                     + (f"，多出的 {extra:,.0f} 用之前留下的现金（没有就按正常额度买）" if extra > 0 else "") + "。"
-                     + ("有资产偏离目标 5 个百分点以上，建议这次再平衡。" if rebalance else "")) if zh else
-                    (f"A-shares sit at the {100 * (pct or 0):.0f}th percentile of their last 5 years ({pos}): the A-share part "
-                     f"gets {m:.2f}x its normal amount" + (f"; {held_back:,.0f} is kept as cash for cheaper times" if held_back > 0 else "")
-                     + "." + (" Some weights are 5+ points off target: rebalance this time." if rebalance else "")),
-            "caveats": ("历史成绩用的是价格指数（不含分红，国债指数含利息）、美股按美元计算、没扣基金费用；"
-                        "黄金和美股是过去 20 年表现最好的两类资产，未来不一定一样。不是投资建议。") if zh else
-                       ("History uses price indices (no dividends; the bond index includes coupons), US in dollars, no "
-                        "fund fees; gold and US stocks had an unusually good 20 years. Not advice.")}
+            "a_share_position": pct, "a_share_label": pos, "a_multiplier": m, "held_back": round(held_back, 2),
+            "extra_from_cash": round(extra, 2), "rebalance": rebalance, "as_of": str(px.index[-1]),
+            "currency": "usd" if usd else "cny", "note": note, "caveats": caveats}
 
 
 def summary_text(h: dict, lang: str = "zh") -> list[str]:

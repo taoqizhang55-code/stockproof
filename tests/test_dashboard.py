@@ -86,7 +86,7 @@ class DashboardServer(unittest.TestCase):
             return e.code, json.loads(e.read())
 
     def test_paper_trading_api(self):
-        st, r = self.post("/api/paper", {"action": "new", "name": "t", "cash": 50000})
+        st, r = self.post("/api/paper", {"action": "new", "name": "t", "cash": 50000, "market": "us"})
         self.assertEqual(st, 200)
         aid = r["id"]
         st, o = self.post("/api/paper", {"action": "buy", "account": aid, "ticker": "mrk", "value": 10000})

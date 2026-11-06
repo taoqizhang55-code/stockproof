@@ -145,3 +145,17 @@ def test_plan_account_buys_targets_then_waits_a_year(env):
     assert abs(w["510300.SH"] - 0.6) < 0.02 and abs(w["511010.SH"] - 0.4) < 0.02
     assert paper.step_plan(store, str(d), pid, now=at("2026-04-01"))["rebalance"] is False
     del pl.PROFILES["_t"]
+
+
+def test_archive_and_market_checks(env):
+    d, store, aid = env
+    with pytest.raises(ValueError, match="another market"):
+        paper.place(store, aid, "AAPL", "buy", value=1000)
+    hk = paper.create_account(store, "港股", 100_000, "hk", start_day="2026-03-02")
+    paper.place(store, hk, "00700.HK", "buy", shares=150)
+    assert paper.orders(store, hk).iloc[0]["shares"] == 100           # lot of 100 assumed
+    paper.archive(store, hk)
+    assert hk not in {a["id"] for a in paper.accounts(store, include_archived=False)}
+    paper.archive(store, hk, on=False)
+    assert hk in {a["id"] for a in paper.accounts(store, include_archived=False)}
+    assert paper.COSTS["hk"].buy(pd.Timestamp("2026-03-02")) > paper.COSTS["us"].buy(pd.Timestamp("2026-03-02"))

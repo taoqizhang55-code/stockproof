@@ -35,6 +35,7 @@ FEATURES = ["mom_12_1", "rev_1m", "vol_3m", "np_yoy", "rev_yoy", "roe", "gm", "e
 FEATURE_ZH = {"mom_12_1": "过去 12 个月走势（去掉最近 1 个月）", "rev_1m": "最近 1 个月涨跌", "vol_3m": "近 3 个月波动",
               "np_yoy": "净利润同比增长", "rev_yoy": "营收同比增长", "roe": "ROE", "gm": "毛利率", "ep": "盈利收益率（市盈率的倒数）"}
 COST = 0.0035                     # one A-share round trip: commission + slippage both ways + stamp duty
+COST_BY_MARKET = {"cn": 0.0035, "us": 0.001}
 MIN_TRAIN_MONTHS = 24
 TOP = 0.1
 
@@ -45,12 +46,18 @@ def _dir(data_dir: str) -> str:
     return d
 
 
-def _path(data_dir: str) -> str:
-    return os.path.join(_dir(data_dir), "forecast_cn.json")
+def _path(data_dir: str, market: str = "cn") -> str:
+    return os.path.join(_dir(data_dir), f"forecast_{market}.json")
 
 
-def load(data_dir: str) -> dict | None:
-    p = _path(data_dir)
+def market_of(ticker: str) -> str:
+    from stockproof import cn
+    p = cn.parse(ticker)
+    return "us" if not p else "hk" if p["market"] == "HK" else "cn"
+
+
+def load(data_dir: str, market: str = "cn") -> dict | None:
+    p = _path(data_dir, market)
     if not os.path.exists(p):
         return None
     with open(p, encoding="utf-8") as f:
@@ -58,8 +65,15 @@ def load(data_dir: str) -> dict | None:
 
 
 # ---------------------------------------------------------------- data
-def prices(data_dir: str) -> tuple[pd.DataFrame, str]:
-    """Whole-market adjusted closes if downloaded (`stockproof forecast --download`), else the research universe."""
+def prices(data_dir: str, market: str = "cn") -> tuple[pd.DataFrame, str]:
+    """Whole-market adjusted closes if downloaded (`stockproof forecast --download`), else the research universe.
+    US: the research universe (S&P 500 members), price features only."""
+    if market == "us":
+        from stockproof import lab
+        px = lab.stock_prices(data_dir, "us")
+        if px is None:
+            raise RuntimeError("no US research prices: run `stockproof research --market us` once")
+        return px, "sp500"
     p = os.path.join(_dir(data_dir), "cn_all_prices.csv.gz")
     if os.path.exists(p):
         df = pd.read_csv(p, index_col=0, parse_dates=True).sort_index()
@@ -113,9 +127,9 @@ def _rank(df: pd.DataFrame) -> pd.DataFrame:
     return df.rank(axis=1, pct=True)
 
 
-def panel(data_dir: str, log=print) -> tuple[dict, pd.DataFrame, str]:
+def panel(data_dir: str, log=print, market: str = "cn") -> tuple[dict, pd.DataFrame, str]:
     """Month-end feature ranks (dict of DataFrames: date x stock) and the price panel."""
-    px, universe = prices(data_dir)
+    px, universe = prices(data_dir) if market == "cn" else prices(data_dir, market)
     px = px.loc[:, px.notna().sum() > 260]
     ret = px.pct_change(fill_method=None)
     me = px.resample("ME").last().index
@@ -123,7 +137,7 @@ def panel(data_dir: str, log=print) -> tuple[dict, pd.DataFrame, str]:
     me = pd.DatetimeIndex(sorted(set(me)))
     pos = {d: i for i, d in enumerate(px.index)}
     feats: dict[str, dict] = {f: {} for f in FEATURES}
-    fund = fundamentals(data_dir)
+    fund = fundamentals(data_dir) if market == "cn" else pd.DataFrame()
     codes = {c: c[:6] for c in px.columns}
     latest_fund = None
     if len(fund):
@@ -160,7 +174,7 @@ def _fit(X: np.ndarray, y: np.ndarray, l2: float = 10.0) -> np.ndarray:
 
 
 def walk_forward(F: dict, px: pd.DataFrame, horizon: int, holdout: pd.Timestamp | None = None,
-                 keep_preds: bool = False) -> dict:
+                 keep_preds: bool = False, cost: float = COST) -> dict:
     feats = list(F)
     dates = F[feats[0]].index
     cols = px.columns
@@ -234,7 +248,7 @@ def walk_forward(F: dict, px: pd.DataFrame, horizon: int, holdout: pd.Timestamp 
         dec = pd.qcut(both.iloc[:, 0].rank(method="first"), 10, labels=False)
         deciles.append(both.iloc[:, 1].groupby(dec).mean().to_numpy())
         picks.append({"date": d.date().isoformat(), "ic": float(ic), "top_excess": gross,
-                      "net": gross - COST * turnover, "turnover": turnover, "n": int(len(both)),
+                      "net": gross - cost * turnover, "turnover": turnover, "n": int(len(both)),
                       "holdout": bool(holdout is not None and d >= holdout - pd.Timedelta(days=int(horizon * 1.45)))})
     df = pd.DataFrame(picks)
 
@@ -273,15 +287,15 @@ def walk_forward(F: dict, px: pd.DataFrame, horizon: int, holdout: pd.Timestamp 
     return out
 
 
-def run(data_dir: str, log=print) -> dict:
+def run(data_dir: str, log=print, market: str = "cn") -> dict:
     from stockproof import lab
     h0 = lab.holdout_start()
-    F, px, universe = panel(data_dir, log)
-    res = {"made": dt.date.today().isoformat(), "universe": universe, "stocks": int(px.shape[1]),
-           "holdout_start": h0.date().isoformat(), "cost": COST, "horizons": {}}
+    F, px, universe = panel(data_dir, log, market) if market != "cn" else panel(data_dir, log)
+    res = {"made": dt.date.today().isoformat(), "market": market, "universe": universe, "stocks": int(px.shape[1]),
+           "holdout_start": h0.date().isoformat(), "cost": COST_BY_MARKET.get(market, COST), "horizons": {}}
     for name, h in HORIZONS.items():
         log(f"  forecast {name}: walk-forward ...")
-        r = walk_forward(F, px, h, h0)
+        r = walk_forward(F, px, h, h0, cost=COST_BY_MARKET.get(market, COST))
         latest = r.pop("latest", {})
         if latest:
             s = pd.Series(latest)
@@ -291,7 +305,7 @@ def run(data_dir: str, log=print) -> dict:
                                 "expected": None if not dec else round(float(dec[min(9, int(pct[tk] * 10))]), 4)}
                            for tk in s.index}
         res["horizons"][name] = r
-    with open(_path(data_dir), "w", encoding="utf-8") as f:
+    with open(_path(data_dir, market), "w", encoding="utf-8") as f:
         json.dump(res, f, ensure_ascii=False, default=str)
     return res
 
@@ -330,7 +344,7 @@ def _line(name: str, x: dict, r: dict, zh: bool) -> str:
     rank = f"{100 * x['pct']:.0f}"
     exp = x.get("expected")
     if zh:
-        s = f"未来 {hz}：在可比的 A 股里排第 {rank} 百分位（100 最看好）"
+        s = f"未来 {hz}：在可比的股票里排第 {rank} 百分位（100 最看好）"
         if exp is not None:
             s += f"，历史上同档股票平均相对大盘 {100 * exp:+.1f}%"
         s += "。" + STATUS_ZH.get(r.get("status") or ("fails" if not r.get("passes") else "unconfirmed"), "")
@@ -349,8 +363,10 @@ def _line(name: str, x: dict, r: dict, zh: bool) -> str:
 def summary_text(res: dict, lang: str = "zh") -> list[str]:
     zh = lang == "zh"
     out = []
-    uni = ("全市场" if res.get("universe") == "all" else "今天的沪深300 成分股（偏乐观，建议下载全市场价格）") if zh else \
-          ("the whole market" if res.get("universe") == "all" else "today's CSI 300 members (optimistic; download the whole market)")
+    uni = {"all": "全市场 A 股", "sp500": "今天的标普500 成分股（只用价格类指标，偏乐观）"}.get(res.get("universe"),
+           "今天的沪深300 成分股（偏乐观，建议下载全市场价格）") if zh else \
+          {"all": "the whole A-share market", "sp500": "today's S&P 500 members (price features only; optimistic)"}.get(
+              res.get("universe"), "today's CSI 300 members (optimistic; download the whole market)")
     out.append((f"范围：{uni}，{res.get('stocks')} 只股票；每次买入排名前 10% 的股票，持有到期，和平均股票比，扣成本 {100 * res['cost']:.2f}%/次。")
                if zh else f"Universe: {uni}, {res.get('stocks')} stocks; buy the top 10%, hold, vs the average stock, {100 * res['cost']:.2f}% per round trip.")
     for name, r in res["horizons"].items():

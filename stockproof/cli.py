@@ -726,16 +726,21 @@ def cmd_forecast(args) -> int:
               "Downloading whole-market A-share prices (Yahoo, resumable batches; 30-60 min the first time) ...")
         r = fc.download_prices(args.data_dir, start=f"{args.since}-01-01", log=print)
         print(("完成：" if zh else "Done: ") + json.dumps(r, ensure_ascii=False))
-    res = fc.load(args.data_dir)
+    mkt = args.market or (fc.market_of(args.tickers[0]) if args.tickers else "cn")
+    if mkt == "hk":
+        print("港股暂不支持中长期预测。" if zh else "Hong Kong isn't covered yet.")
+        return 1
+    res = fc.load(args.data_dir, mkt)
     if res is None or args.refresh or args.download:
         print("训练并检验中长期预测（逐月滚动，只用过去的数据）……" if zh else "Fitting and testing (walk-forward) ...")
-        res = fc.run(args.data_dir, log=print)
+        res = fc.run(args.data_dir, log=print, market=mkt)
     print(("中长期预测（" if zh else "Medium/long-horizon forecasts (") + res["made"] + "）")
     for line in fc.summary_text(res, args.lang):
         print("  · " + line)
     for tk in args.tickers:
         t = cn.canonical(tk) if cn.is_cn(tk) else tk.upper()
-        v = fc.stock_view(res, t, args.lang)
+        r_ = res if fc.market_of(t) == mkt else (fc.load(args.data_dir, fc.market_of(t)) or {})
+        v = fc.stock_view(r_, t, args.lang) if r_ else None
         print()
         if not v:
             print(f"{t}: " + ("不在预测范围内（只做 A 股；下载全市场价格后范围更大：stockproof forecast --download）" if zh else
@@ -803,6 +808,12 @@ def cmd_paper(args) -> int:
         print("  " + ("从今天起，每天 `stockproof paper run` 按策略下单（daily 会自动跑）。" if zh else
                       "From today on, `stockproof paper run` (also part of daily) places its orders."))
         return 0
+    if a in ("archive", "unarchive"):
+        x = acct(args.account)
+        paper.archive(store, x["id"], a == "archive")
+        print((("已归档（记录保留，只是不在列表里显示）：" if a == "archive" else "已取消归档：") if zh else
+               ("Archived (records kept, hidden from lists): " if a == "archive" else "Unarchived: ")) + f"{x['name']} ({x['id']})")
+        return 0
     if a == "plan":
         aid = paper.create_plan_account(store, args.data_dir, args.profile, args.cash, args.name, args.lang)
         r = paper.step_plan(store, args.data_dir, aid)
@@ -853,7 +864,7 @@ def cmd_paper(args) -> int:
         print("  " + g["note"])
         return 0
     if a == "list" or (a == "show" and not args.account):
-        for x in paper.accounts(store):
+        for x in paper.accounts(store, include_archived=args.all):
             s = paper.state(store, args.data_dir, x["id"])
             print(f"  {x['id']}  {x['name'][:24]:24s} {x['kind']:8s} {s['value']:>14,.0f}  {_pct(s['return'])} "
                   f"vs {_pct(s.get('benchmark_return'))}  {'since' if not zh else '起始'} {x['start_day']}")
@@ -1564,7 +1575,7 @@ def build_parser() -> argparse.ArgumentParser:
     ak.set_defaults(func=cmd_ask)
 
     pl = sub.add_parser("plan", help="long-term plan: A-shares + bonds + gold + US, monthly buying, yearly rebalance")
-    pl.add_argument("--profile", default="balanced", choices=["conservative", "balanced", "growth", "a_only"])
+    pl.add_argument("--profile", default="balanced", choices=["conservative", "balanced", "growth", "a_only", "us_conservative", "us_balanced", "us_growth", "us_only"])
     pl.add_argument("--monthly", type=float, default=3000.0, help="how much you invest each month")
     pl.add_argument("--holdings", help='what you hold now, by ETF code: "510300:20000,511010:30000"')
     pl.add_argument("--lang", default="zh", choices=["en", "zh"])
@@ -1575,6 +1586,7 @@ def build_parser() -> argparse.ArgumentParser:
     fo.add_argument("tickers", nargs="*")
     fo.add_argument("--download", action="store_true", help="first download whole-market A-share prices (30-60 min)")
     fo.add_argument("--refresh", action="store_true", help="refit and retest")
+    fo.add_argument("--market", choices=["cn", "us"], help="which market (default: from the first ticker, else cn)")
     fo.add_argument("--since", default="2015", help="--download: first year (2005 for 20 years incl. 2007-08 and 2015)")
     fo.add_argument("--lang", default="zh", choices=["en", "zh"])
     fo.add_argument("--data-dir", default=DATA_DIR)
@@ -1598,20 +1610,21 @@ def build_parser() -> argparse.ArgumentParser:
 
     pp = sub.add_parser("paper", help="paper trading: pessimistic fills, append-only record, NAV vs the market (no real orders)")
     pp.add_argument("action", nargs="?", default="list",
-                    choices=["list", "new", "strategy", "forecast", "plan", "buy", "sell", "run", "show", "gap", "from-team"])
+                    choices=["list", "new", "strategy", "forecast", "plan", "archive", "unarchive", "buy", "sell", "run", "show", "gap", "from-team"])
     pp.add_argument("account", nargs="?", help="account id or name (buy / sell / show / gap / from-team)")
     pp.add_argument("ticker", nargs="?", help="stock (buy / sell)")
     pp.add_argument("--shares", type=int)
     pp.add_argument("--value", type=float, help="buy for about this much money")
     pp.add_argument("--name")
     pp.add_argument("--cash", type=float, default=1_000_000.0)
-    pp.add_argument("--market", default="cn", choices=["cn", "us"])
+    pp.add_argument("--market", default="cn", choices=["cn", "hk", "us"])
+    pp.add_argument("--all", action="store_true", help="list: include archived accounts")
     pp.add_argument("--spec", help="strategy: a lab spec JSON (earnings / forecast / smart_money)")
     pp.add_argument("--exp", help="strategy: a lab experiment id")
     pp.add_argument("--call", help="from-team: the team call's log id")
     pp.add_argument("--horizon", default="6m", choices=["3m", "6m", "12m"], help="forecast: which forecast to follow")
     pp.add_argument("--n", type=int, default=50, help="forecast: how many top stocks to hold")
-    pp.add_argument("--profile", default="balanced", choices=["conservative", "balanced", "growth"], help="plan: which mix")
+    pp.add_argument("--profile", default="balanced", choices=["conservative", "balanced", "growth", "us_conservative", "us_balanced", "us_growth"], help="plan: which mix")
     pp.add_argument("--note")
     pp.add_argument("--lang", default="zh", choices=["en", "zh"])
     pp.add_argument("--data-dir", default=DATA_DIR)

@@ -187,15 +187,82 @@ def recent(store, limit: int = 50) -> list[dict]:
     return [dict(zip(cols, r)) for r in cur.fetchall()]
 
 
-def market_open(now: dt.datetime | None = None) -> dict:
-    """Which markets are in session right now (weekdays; holidays not checked)."""
+def us_holidays(year: int) -> set[dt.date]:
+    """NYSE full-day holidays by rule (observed dates): New Year, MLK, Presidents, Good Friday, Memorial,
+    Juneteenth (from 2022), Independence, Labor, Thanksgiving, Christmas."""
+    def nth(month, weekday, n):                       # n-th weekday of a month (n = -1: last)
+        if n > 0:
+            d = dt.date(year, month, 1)
+            d += dt.timedelta(days=(weekday - d.weekday()) % 7)
+            return d + dt.timedelta(weeks=n - 1)
+        d = dt.date(year, month + 1, 1) - dt.timedelta(days=1) if month < 12 else dt.date(year, 12, 31)
+        return d - dt.timedelta(days=(d.weekday() - weekday) % 7)
+
+    def observed(d):
+        return d - dt.timedelta(days=1) if d.weekday() == 5 else d + dt.timedelta(days=1) if d.weekday() == 6 else d
+    a = year % 19; b, c = divmod(year, 100); d_, e = divmod(b, 4); g = (8 * b + 13) // 25
+    h = (19 * a + b - d_ - g + 15) % 30; j, k = divmod(c, 4); m = (a + 11 * h) // 319
+    r = (2 * e + 2 * j - k - h + m + 32) % 7; month = (h - m + r + 90) // 25; day = (h - m + r + month + 19) % 32
+    easter = dt.date(year, month, day)
+    out = {observed(dt.date(year, 1, 1)), nth(1, 0, 3), nth(2, 0, 3), easter - dt.timedelta(days=2), nth(5, 0, -1),
+           observed(dt.date(year, 7, 4)), nth(9, 0, 1), nth(11, 3, 4), observed(dt.date(year, 12, 25))}
+    if year >= 2022:
+        out.add(observed(dt.date(year, 6, 19)))
+    return out
+
+
+_CN_DAYS: set[dt.date] | None = None
+
+
+def cn_trading_days(data_dir: str | None = None, fetch: bool = True) -> set[dt.date] | None:
+    """The exchanges' published A-share trading calendar (AKShare / Sina), cached for a month."""
+    global _CN_DAYS
+    if _CN_DAYS is not None:
+        return _CN_DAYS
+    import os
+    if not data_dir:
+        from stockproof.cli import default_data_dir
+        data_dir = default_data_dir()
+    p = os.path.join(data_dir, "cn", "trade_dates.json")
+    if os.path.exists(p) and (dt.date.today() - dt.date.fromtimestamp(os.path.getmtime(p))).days < 30:
+        with open(p) as f:
+            _CN_DAYS = {dt.date.fromisoformat(x) for x in json.load(f)}
+        return _CN_DAYS
+    if not fetch or os.environ.get("STOCKPROOF_MARKET_DATA") == "0":
+        return None
+    try:
+        df = cn._ak().tool_trade_date_hist_sina()
+        days = sorted(pd.to_datetime(df["trade_date"]).dt.date)
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "w") as f:
+            json.dump([d.isoformat() for d in days if d.year >= 2020], f)
+        _CN_DAYS = set(days)
+    except Exception:
+        return None
+    return _CN_DAYS
+
+
+def is_trading_day(market: str, day: dt.date, data_dir: str | None = None) -> bool:
+    if day.weekday() >= 5:
+        return False
+    if market == "us":
+        return day not in us_holidays(day.year)
+    if market == "cn":
+        cal = cn_trading_days(data_dir)
+        if cal and max(cal) >= day:
+            return day in cal
+    return True                                          # unknown: weekdays
+
+
+def market_open(now: dt.datetime | None = None, data_dir: str | None = None) -> dict:
+    """Which markets are in session right now: hours, weekends and holidays (A-share exchange calendar, NYSE rules)."""
     from zoneinfo import ZoneInfo
     now = now or dt.datetime.now(dt.timezone.utc)
     sh = now.astimezone(ZoneInfo("Asia/Shanghai"))
     ny = now.astimezone(ZoneInfo("America/New_York"))
     t_sh, t_ny = sh.hour * 60 + sh.minute, ny.hour * 60 + ny.minute
-    return {"cn": sh.weekday() < 5 and (570 <= t_sh <= 690 or 780 <= t_sh <= 900),
-            "us": ny.weekday() < 5 and 570 <= t_ny <= 960}
+    return {"cn": (570 <= t_sh <= 690 or 780 <= t_sh <= 900) and is_trading_day("cn", sh.date(), data_dir),
+            "us": 570 <= t_ny <= 960 and is_trading_day("us", ny.date(), data_dir)}
 
 
 def watch(app, store, interval: int = 60, once: bool = False, lang: str = "zh", log=print, notify: bool = True) -> list[dict]:
@@ -204,7 +271,7 @@ def watch(app, store, interval: int = 60, once: bool = False, lang: str = "zh", 
     seen = []
     while True:
         tks = watch_list(app, store)
-        mo = market_open()
+        mo = market_open(data_dir=app.data_dir)
         live_tk = [t for t in tks if mo["cn" if cn.is_cn(t) else "us"]]
         live = live_prices(live_tk) if live_tk else {}
         new = check(store, app.data_dir, tks, live, lang)

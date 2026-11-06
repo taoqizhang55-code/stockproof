@@ -212,7 +212,7 @@ BODY = """
 <section class="card">
   <h2 id="pp-h"></h2>
   <p class="note" id="pp-lead"></p>
-  <div class="toolbar"><input id="pp-name" class="btn" style="width:160px"><input id="pp-cash" class="btn" style="width:120px" value="1000000">
+  <div class="toolbar"><input id="pp-name" class="btn" style="width:160px"><input id="pp-cash" class="btn" style="width:120px" value="1000000"><select id="pp-market" class="btn"><option value="cn">A 股</option><option value="hk">港股</option><option value="us">美股</option></select>
     <button class="btn primary" id="pp-new"></button><button class="btn" id="pp-fc"></button><button class="btn" id="pp-run"></button><span class="note" id="pp-msg"></span></div>
   <div id="pp-accounts"></div>
 </section>
@@ -230,7 +230,7 @@ BODY = """
 <section class="card" style="margin-top:12px"><h2 id="pl-hist-h"></h2><div id="pl-hist"></div></section>
 </div>
 <section class="card" style="margin-top:12px"><h2 id="al-h"></h2>
-  <div class="toolbar"><button class="btn" id="al-check"></button><span class="note" id="al-meta"></span></div>
+  <div class="toolbar"><button class="btn" id="al-check"></button><label class="note"><input type="checkbox" id="al-live"> <span id="al-live-l"></span></label><span class="note" id="al-meta"></span></div>
   <div id="al-list"></div></section>
 </div>
 <div id="view-money" hidden>
@@ -348,10 +348,11 @@ function applyText() {
 $("#pl-h").textContent = tr("d_pl_h"); $("#pl-lead").textContent = tr("d_pl_lead");
   $("#pl-amt-l").textContent = tr("d_pl_amount"); $("#pl-go").textContent = tr("d_pl_go"); $("#pl-paper").textContent = tr("d_pl_paper");
   $("#pl-hold-l").textContent = tr("d_pl_hold"); $("#pl-hist-h").textContent = tr("d_pl_hist_h");
-  $("#pl-profile").innerHTML = ["conservative", "balanced", "growth"].map((p) => `<option value="${p}"${p === "balanced" ? " selected" : ""}>${esc(tr("d_pl_p_" + p))}</option>`).join("");
+  $("#pl-profile").innerHTML = `<optgroup label="${esc(tr("d_pl_g_cny"))}">` + ["conservative", "balanced", "growth"].map((p) => `<option value="${p}"${p === "balanced" ? " selected" : ""}>${esc(tr("d_pl_p_" + p))}</option>`).join("")
+    + `</optgroup><optgroup label="${esc(tr("d_pl_g_usd"))}">` + ["us_conservative", "us_balanced", "us_growth"].map((p) => `<option value="${p}">${esc(tr("d_pl_p_" + p))}</option>`).join("") + "</optgroup>";
   $("#tab-paper").textContent = tr("d_tab_paper"); $("#pp-h").textContent = tr("d_pp_h"); $("#pp-lead").textContent = tr("d_pp_lead");
   $("#pp-name").placeholder = tr("d_pp_name"); $("#pp-new").textContent = tr("d_pp_new"); $("#pp-fc").textContent = tr("d_pp_fc"); $("#pp-run").textContent = tr("d_pp_run");
-  $("#al-h").textContent = tr("d_al_h"); $("#al-check").textContent = tr("d_al_check");
+  $("#al-h").textContent = tr("d_al_h"); $("#al-check").textContent = tr("d_al_check"); $("#al-live-l").textContent = tr("d_al_live");
   $("#tab-team").textContent = tr("d_tab_team"); $("#team-h").textContent = tr("d_team_page_h"); $("#team-lead").textContent = tr("d_team_page_lead");
   $("#team-input").placeholder = tr("d_team_placeholder"); $("#team-go").textContent = tr("d_team_go"); $("#team-hist-h").textContent = tr("d_team_hist"); $("#mm-download").textContent = tr("d_mm_download");
   $("#tab-home").textContent = tr("d_tab_home"); $("#tab-lab").textContent = tr("d_tab_lab");
@@ -695,10 +696,11 @@ async function loadPaper(id) {
   try { PP = await api("/api/paper" + (ppSel ? "?id=" + encodeURIComponent(ppSel) : "")); } catch (e) { PP = {accounts: []}; }
   const A = PP.accounts || [];
   $("#pp-accounts").innerHTML = A.length ? `<table><thead><tr><th>${esc(tr("d_pp_acct"))}</th><th>${esc(tr("d_pp_value"))}</th><th>${esc(tr("d_pp_ret"))}</th><th>${esc(tr("d_pp_bench"))}</th><th>${esc(tr("d_pp_excess"))}</th><th>${esc(tr("d_pp_dd"))}</th><th></th></tr></thead><tbody>` +
-    A.map((a) => `<tr class="pp-row" data-pp="${esc(a.id)}" style="cursor:pointer"><td class="tk">${esc(a.name)}<small>${esc(a.kind === "strategy" ? tr("d_pp_strategy") : a.kind === "forecast" ? tr("d_pp_fckind") : a.kind === "plan" ? tr("d_pp_plankind") : tr("d_pp_manual"))} · ${esc(tr("d_pp_since", {d: a.start_day}))}</small></td>
+    A.map((a) => `<tr class="pp-row" data-pp="${esc(a.id)}" style="cursor:pointer"><td class="tk">${esc(a.name)}${a.archived ? ` <span class="chip neutral">${esc(tr("d_pp_archived"))}</span>` : ""}<small>${esc(a.kind === "strategy" ? tr("d_pp_strategy") : a.kind === "forecast" ? tr("d_pp_fckind") : a.kind === "plan" ? tr("d_pp_plankind") : tr("d_pp_manual"))} · ${esc(tr("d_pp_since", {d: a.start_day}))}</small></td>
       <td class="num">${money(a.value)}</td><td>${pctChip(a["return"])}</td><td>${a.benchmark_return == null ? "—" : pctChip(a.benchmark_return)}</td>
       <td>${a.excess == null ? "—" : pctChip(a.excess)}</td><td class="num">${pct1(a.max_drawdown)}</td><td class="note">${a.pending ? esc(tr("d_pp_pending", {n: a.pending})) : ""}</td></tr>`).join("") + `</tbody></table>`
     : `<p class="empty">${esc(tr("d_pp_none"))}</p>`;
+  $("#pp-accounts").insertAdjacentHTML("beforeend", `<label class="note"><input type="checkbox" id="pp-showarch"${A.some((a) => a.archived) ? " checked" : ""}> ${esc(tr("d_pp_showarch"))}</label>`);
   const card = $("#pp-detail-card"), d = PP.detail;
   card.hidden = !d;
   if (!d) return;
@@ -716,7 +718,8 @@ async function loadPaper(id) {
   const g = PP.gap;
   if (g) h += `<div class="histbox"><h3>${esc(tr("d_pp_gap_h"))}</h3><p>${esc(tr("d_pp_gap", {n: g.round_trips, m: g.missed_entries}))}${g.avg_gap != null ? " · " + esc(tr("d_pp_gap_v", {a: pct1(g.avg_backtest_rule), b: pct1(g.avg_paper), c: pct1(g.avg_gap)})) : ""}</p>
     ${g.lab_backtest_ann_excess != null ? `<p class="note">${esc(tr("d_pp_gap_lab", {a: pct1(g.lab_backtest_ann_excess)}))}</p>` : ""}<p class="note">${esc(g.note)}</p></div>`;
-  $("#pp-detail").innerHTML = h + `<p class="note">${esc(d.rules)}</p><p><button class="btn sm" data-share="paper|${esc(ac.id)}">${esc(tr("d_card_make"))}</button></p>`;
+  const isArch = (PP.accounts.find((x) => x.id === ac.id) || {}).archived;
+  $("#pp-detail").innerHTML = h + `<p class="note">${esc(d.rules)}</p><p><button class="btn sm" data-share="paper|${esc(ac.id)}">${esc(tr("d_card_make"))}</button> <button class="btn sm" data-pparch="${esc(ac.id)}" data-on="${isArch ? 0 : 1}">${esc(tr(isArch ? "d_pp_unarchive" : "d_pp_archive"))}</button></p>`;
 }
 async function ppAct(body) {
   const msg = $("#pp-msg");
@@ -727,17 +730,23 @@ async function ppAct(body) {
 }
 async function loadPxAlerts(check) {
   let r; try { r = check ? await api("/api/pxalerts", {}) : await api("/api/pxalerts"); } catch (e) { r = {recent: [], error: e.message}; }
+  if (r.live !== undefined) $("#al-live").checked = r.live;
   $("#al-meta").textContent = r.error ? r.error : (check ? tr("d_al_meta", {n: (r.new || []).length, w: (r.watching || []).length}) + " " + (r.note || "") : tr("d_al_cli"));
   const R = r.recent || [];
   $("#al-list").innerHTML = R.length ? `<ul class="pts">${R.map((a) => `<li><span class="note">${esc(a.created_at.slice(5, 16).replace("T", " "))}</span> ${esc(a.text)}</li>`).join("")}</ul>` : `<p class="empty">${esc(tr("d_al_none"))}</p>`;
 }
-$("#pp-new").onclick = async () => { await ppAct({action: "new", name: $("#pp-name").value, cash: Number($("#pp-cash").value) || 1000000}); loadPaper(); };
+$("#pp-new").onclick = async () => { await ppAct({action: "new", name: $("#pp-name").value, cash: Number($("#pp-cash").value) || 1000000, market: $("#pp-market").value}); loadPaper(); };
 $("#pp-fc").onclick = async () => { $("#pp-msg").textContent = "…"; await ppAct({action: "forecast", horizon: "6m", n: 50, cash: Number($("#pp-cash").value) || 1000000}); loadPaper(); };
 $("#pp-run").onclick = async () => { $("#pp-msg").textContent = tr("d_pp_running"); await ppAct({action: "run"}); loadPaper(); };
+$("#al-live").onchange = async (e) => { await api("/api/paper", {action: "live_alerts", on: e.target.checked}); $("#al-meta").textContent = tr(e.target.checked ? "d_al_live_on" : "d_al_live_off"); };
 $("#al-check").onclick = () => { $("#al-meta").textContent = "…"; loadPxAlerts(true); };
 document.addEventListener("click", async (e) => {
   const row = e.target.closest("tr.pp-row");
   if (row) return loadPaper(row.dataset.pp);
+  const ar = e.target.closest("[data-pparch]");
+  if (ar) { await ppAct({action: ar.dataset.on === "1" ? "archive" : "unarchive", account: ar.dataset.pparch}); ppSel = null; return loadPaper(null); }
+  const sa = e.target.closest("#pp-showarch");
+  if (sa) { await api("/api/paper", {action: "show_archived", on: sa.checked}); return loadPaper(); }
   const o = e.target.closest("[data-ppo]");
   if (o && ppSel) { await ppAct({action: o.dataset.ppo, account: ppSel, ticker: $("#pp-tk").value, value: Number($("#pp-val").value) || 0, shares: Number($("#pp-sh").value) || 0}); return loadPaper(); }
   const pe = e.target.closest("[data-paperexp]");
@@ -884,7 +893,7 @@ let PL = null;
 function planPathSVG(paths) {
   const W = 700, H = 200, all = Object.values(paths).flat().map((r) => r[1]), lo = Math.log(Math.min(...all)), hi = Math.log(Math.max(...all));
   const n = Math.max(...Object.values(paths).map((p) => p.length)), x = (i) => 40 + i * (W - 50) / (n - 1), y = (v) => 10 + (H - 30) * (1 - (Math.log(v) - lo) / ((hi - lo) || 1));
-  const cols = {a_only: "#999", conservative: "#1f9d55", balanced: "var(--accent)", growth: "#d9363e"};
+  const cols = {a_only: "#999", conservative: "#1f9d55", balanced: "var(--accent)", growth: "#d9363e", us_only: "#999", us_conservative: "#1f9d55", us_balanced: "var(--accent)", us_growth: "#d9363e"};
   let g = "";
   for (const [k, p] of Object.entries(paths)) g += `<polyline fill="none" stroke="${cols[k] || "#555"}" stroke-width="${k === "a_only" ? 1.5 : 2.2}" points="${p.map((r, i) => x(i) + "," + y(r[1]).toFixed(1)).join(" ")}"/>`;
   const first = Object.values(paths)[0];
@@ -893,7 +902,10 @@ function planPathSVG(paths) {
 }
 async function loadPlan() {
   const hb = $("#pl-hold");
-  if (!hb.childElementCount) hb.innerHTML = ["hs300", "zz500", "bond", "gold", "spx"].map((a) => `<label class="note">${esc(tr("d_pl_a_" + a))} <input class="btn pl-h" data-a="${a}" style="width:100px" placeholder="0"></label>`).join(" ");
+  const usd = $("#pl-profile").value.startsWith("us_");
+  const holdAssets = usd ? ["vti", "efa", "fxi", "agg", "gld"] : ["hs300", "zz500", "bond", "gold", "spx"];
+  if (hb.dataset.cur !== String(usd)) { hb.dataset.cur = String(usd); hb.innerHTML = ""; }
+  if (!hb.childElementCount) hb.innerHTML = holdAssets.map((a) => `<label class="note">${esc(tr("d_pl_a_" + a))} <input class="btn pl-h" data-a="${a}" style="width:100px" placeholder="0"></label>`).join(" ");
   const q = new URLSearchParams({profile: $("#pl-profile").value, amount: $("#pl-amount").value || "3000", lang: S.lang});
   document.querySelectorAll(".pl-h").forEach((i) => { if (i.value) q.set("h_" + i.dataset.a, i.value); });
   $("#pl-month").innerHTML = `<p class="note">…</p>`;
@@ -903,7 +915,7 @@ async function loadPlan() {
   $("#pl-month").innerHTML = `<h3>${esc(tr("d_pl_month", {d: m.as_of, p: tr("d_pl_p_" + m.profile)}))}</h3><table><thead><tr><th>${esc(tr("d_pl_asset"))}</th><th>ETF</th><th>${esc(tr("d_pl_target"))}</th><th>${esc(tr("d_pl_buy"))}</th><th>${esc(tr("d_pl_now"))}</th></tr></thead><tbody>` +
     m.rows.map((r) => `<tr><td>${esc(r.name)}</td><td class="tk">${esc(r.etf)}<small>${esc(r.etf_name)}</small></td><td class="num">${(100 * r.target).toFixed(1)}%</td><td class="num"><b>${Math.round(r.buy).toLocaleString()}</b></td><td class="num">${r.now_weight == null ? "—" : (100 * r.now_weight).toFixed(1) + "%"}${r.drift != null && Math.abs(r.drift) >= 0.05 ? " ⚠" : ""}</td></tr>`).join("") +
     `</tbody></table><p>${esc(m.note)}</p><p class="note">${esc(m.caveats)}</p>`;
-  const H = PL.history, pr = ["conservative", "balanced", "growth", "a_only"], pc = (v) => v == null ? "—" : (100 * v).toFixed(1) + "%";
+  const H = PL.history, pr = usd ? ["us_conservative", "us_balanced", "us_growth", "us_only"] : ["conservative", "balanced", "growth", "a_only"], pc = (v) => v == null ? "—" : (100 * v).toFixed(1) + "%";
   let h = `<table><thead><tr><th>${esc(tr("d_pl_profile"))}</th>${PL.starts.map((s) => `<th>${esc(tr("d_pl_from", {s}))}</th>`).join("")}<th>${esc(tr("d_pl_dd"))}</th><th>${esc(tr("d_pl_worst"))}</th><th>${esc(tr("d_pl_dca"))}</th></tr></thead><tbody>`;
   for (const k of pr) { const p = H.profiles[k], r0 = p.starts[PL.starts[0]];
     h += `<tr><td><b>${esc(tr("d_pl_p_" + k))}</b><small class="note"> ${Object.entries(p.weights).map(([a, w]) => tr("d_pl_a_" + a) + " " + Math.round(100 * w) + "%").join(" / ")}</small></td>${PL.starts.map((s) => `<td class="num">${pc(p.starts[s].lump_cagr)}</td>`).join("")}<td class="num">${pc(r0.lump_maxdd)}</td><td class="num">${pc(r0.worst_year)}</td><td class="num">${pc(r0.dca_irr)} <small class="note">${esc(tr("d_pl_vs"))} ${pc(r0.dca_plain_irr)}</small></td></tr>`; }
@@ -1039,7 +1051,7 @@ function renderDetail(d) {
   if (!d) { box.innerHTML = `<p class="empty">${esc(tr("d_select"))}</p>`; return; }
   const minRel = d.min_relevance, heads = d.headlines.filter((h) => showLow || (h.relevance >= minRel && !h.dup));
   const otherLang = d.headlines.some((h) => h.lang && h.lang !== S.lang);
-  let h = `<h2>${esc(d.ticker)} · ${esc(d.name)} <a class="back" href="#overview" title="↑">↑</a></h2>${priceHTML(d)}${techHTML(d.technical)}${!/\.(SH|SZ|BJ)$/.test(d.ticker) ? `<p class="note">${esc(tr(/\.HK$/.test(d.ticker) ? "d_bm_hk" : "d_bm_us"))}</p>` : `<div id="fc-box" class="histbox" style="margin-top:10px"></div><details class="bigmoney" ontoggle="if(this.open)loadStockMoney('${esc(d.ticker)}')"><summary><b>${esc(tr("d_bm_title"))}</b> <span class="note">${esc(tr("d_bm_sub"))}</span></summary><div id="stock-money"></div></details>`}<h3>${esc(tr("d_history"))}</h3>${chartSVG(d.history)}
+  let h = `<h2>${esc(d.ticker)} · ${esc(d.name)} <a class="back" href="#overview" title="↑">↑</a></h2>${priceHTML(d)}${techHTML(d.technical)}${/\.HK$/.test(d.ticker) ? "" : `<div id="fc-box" class="histbox" style="margin-top:10px"></div>`}${!/\.(SH|SZ|BJ)$/.test(d.ticker) ? `<p class="note">${esc(tr(/\.HK$/.test(d.ticker) ? "d_bm_hk" : "d_bm_us"))}</p>` : `<details class="bigmoney" ontoggle="if(this.open)loadStockMoney('${esc(d.ticker)}')"><summary><b>${esc(tr("d_bm_title"))}</b> <span class="note">${esc(tr("d_bm_sub"))}</span></summary><div id="stock-money"></div></details>`}<h3>${esc(tr("d_history"))}</h3>${chartSVG(d.history)}
     <h3>${esc(tr("d_headlines"))} <span class="num">${heads.length} / ${d.headlines.length}</span></h3>
     <label class="toggle"><input type="checkbox" id="low" ${showLow ? "checked" : ""}> ${esc(tr("d_show_low"))}</label>`;
   if (otherLang) h += `<p class="note">${esc(tr("d_other_lang"))}</p>`;
