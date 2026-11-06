@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "stockproof"
-version = "0.3.0"
+version = "0.4.0"
 description = "LLM stock research with cited sources (news, earnings, filings), tested on 10 years of point-in-time data: quant lab, portfolio check-up, web dashboard, DeepSeek Harness / MCP plugin. US, China A-shares, HK."
 readme = "README.md"
 requires-python = ">=3.10"

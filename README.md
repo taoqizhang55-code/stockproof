@@ -57,7 +57,21 @@ portfolio check-up.
 | | Command | What you get |
 |---|---|---|
 | **Portfolio check-up** | `portfolio` | Your holdings on real price history: concentration, holdings that secretly move together, where the risk comes from, and replays of the 2015 / 2018 / 2020 / 2021–22 / 2024 crashes on today's weights. |
-| **AI agents** | `mcp` | 23 MCP tools (DeepSeek Harness plugin in `dsh-plugin/`; Claude and Cursor work too). Every feature above can be asked in plain words ("what can you do?" lists them), and the agent can **do research it can't do alone**: run backtests on real data, screen 5,000 stocks, check your portfolio. |
+| **AI agents** | `mcp` | 40 MCP tools (DeepSeek Harness plugin in `dsh-plugin/`; Claude and Cursor work too). Every feature above can be asked in plain words ("what can you do?" lists them), and the agent can **do research it can't do alone**: run backtests on real data, screen 5,000 stocks, check your portfolio. |
+
+**New in 0.4: from reading to acting, with a record**
+
+| | Command | What you get |
+|---|---|---|
+| **Ask in one sentence** | `ask` | Type what you want ("茅台为什么跌", "backtest buying after big beats", "buy 100 600519 in my paper account") and it runs the matching feature. |
+| **Charts · click a day** | dashboard, `day` | Candles, moving averages, MACD/RSI/KDJ and support/resistance zones. Click any candle to see that day's move, volume, news and filings. `breakouts` scans for breakouts. |
+| **Smart-money map** | `moneymap` | 43 quarters of top-10 holders: national team (汇金/证金/国新), social security and pensions, northbound, insurance, QFII, funds. Exits the disclosures hide are inferred. Daily ETF creations flag likely rescue buying. Also on each stock's page. |
+| **AI research team** | `team` | Five analysts (fundamentals, technicals, news, smart money, risk) debate; a portfolio manager decides, with a price plan. Every claim cites evidence. Each call is logged and **scored after its horizon**, so the team has a public track record. |
+| **Paper trading** | `paper` | A-share, HK and US accounts with real frictions: next-open fills, limit-up/down, 5%-of-volume cap, T+1, lots, commission (min 5 yuan), stamp duty. Accounts can follow a lab strategy, the forecaster or the long-term plan, and are rebalanced automatically each night. Records can't be edited or deleted. |
+| **Price alerts** | `alerts` | Support/resistance breaks, the team's entry/stop/target levels and paper fills, checked on trading days (A-share, HK and US holidays known) or live while the dashboard is open. |
+| **3–12 month forecast** | `forecast` | Ranks all A-shares on momentum, volatility, growth, ROE, margins and value, refit monthly on past data only. Shows its own test status next to every number (see below). |
+| **Long-term plan** | `plan` | A risk profile (A-shares + bonds + gold + US, or a USD version), this month's buy list with valuation-tilted amounts, yearly rebalancing, and 20 years of history from four bad start dates. |
+| **Share cards** | `card` | An image of a team call, a paper account or a lab result, with its record on it. |
 
 Everything runs in one local web page (`stockproof dashboard`). The **Home** tab shows what you can do, with clickable examples; the **Lab** tab backtests ideas from a form, no JSON needed; the **Portfolio** tab checks up your holdings and remembers them for next time. The first time you use stockproof in DeepSeek Harness, the agent lists everything it can do and suggests trying the dashboard; after that, ask "what can you do?", type `/stockproof` for ready-made requests, or say "open the dashboard". Say "open the dashboard's lab tab" to jump to a page. Running `stockproof` with no arguments prints the same grouped menu, and in DeepSeek Harness typing `/` lists ready-made prompts (check up a portfolio, backtest an idea, why did it move…).
 
@@ -80,7 +94,7 @@ In DeepSeek Harness, type `/stockproof` for ten ready-made requests:
 
 ## What the research found
 
-Run on the author's data (2016–2026). Each result is a click away in the Research tab, with t-statistics and caveats.
+Run on the author's data (2005–2026). Each result is a click away in the Research tab, with t-statistics and caveats.
 
 | Question | Answer |
 |---|---|
@@ -91,8 +105,14 @@ Run on the author's data (2016–2026). Each result is a click away in the Resea
 | Does a fundamentals screen beat the market? | **No.** Top 30 by the composite score: +1.3%/yr vs the same universe (t = 0.5). Momentum alone: +6.4%/yr (t = 1.5, not significant). |
 | Does 新闻联播 policy wording predict industry returns? | **Not tradably.** Over 8,490 new central measures, the strength of the wording is priced in **before the open** (+0.03%, t = 5.3; strongest level +0.12%). Afterwards, supported industries do slightly worse. Backtest: +0.6%/yr (t = 0.4). |
 
+| Does following the national team / pension fund pay? | **No.** Against other stocks disclosed the same month, none of 24 signals (new, add, reduce, exit × six holder kinds) clears the multiple-testing bar at 60, 120 or 250 days. The disclosure comes 1–4 months late. |
+| Can we predict next quarter's national-team buys? | **Yes, but it doesn't pay.** Top-20 picks are hit 2.1× the base rate (AUC 0.64); buying them before the reports earns −0.3% a quarter after costs. |
+| Can 3–12 month returns be predicted? | **They could, until recently.** On 20 years of whole-market data (5,224 stocks incl. delisted), the top 10% beat the average stock by +6.7%/yr after costs at 6 months (t 2.8). In the locked 2024-11→2026 years it lost: low-volatility and value stopped working in the post-September-2024 rally. The app labels it "passed historically, failed in the last two years". |
+| What does work for a long-term investor? | **Diversifying.** Balanced plan (A-shares, bonds, gold, US) started at the 2007 top: +6.7%/yr, worst drop −30%. CSI 300 alone from the same day: −1.7%/yr, −71%. |
+
 The pattern holds across all of these: public information is priced fast. So stockproof helps you **read and check
-evidence faster**. It does not hand you a trading signal, and the app says this wherever it shows a score.
+evidence faster**, and every forecast it shows carries its own test result. It does not place real orders: you can
+practise on paper accounts, and anything real is your decision.
 
 ## Principles
 
@@ -182,6 +202,19 @@ stockproof lab run '{"type":"earnings","filters":[{"field":"sue","op":">=","valu
 stockproof lab confirm <id>                  # one shot on the locked holdout
 stockproof portfolio "600519 100, 00700 300, AAPL 50"   # portfolio check-up
 stockproof demo                              # offline demo, no key
+stockproof ask "茅台为什么跌"                # one sentence → the matching feature
+stockproof team 600519                       # AI research team's call (--record for the track record)
+stockproof day 600519 2024-09-30             # what happened on one day
+stockproof moneymap --ticker 600519          # who holds it: national team, pensions, northbound…
+stockproof moneymap --research               # does following them pay?
+stockproof forecast 600519                   # 3/6/12-month forecast with its test status
+stockproof plan --profile balanced --monthly 5000   # long-term plan: this month's buys
+stockproof paper new --name "My paper" --cash 100000 # paper account (--market cn/hk/us)
+stockproof paper buy <account> 600519 --shares 100
+stockproof paper forecast --horizon 6m --n 50        # account that follows the forecaster
+stockproof paper show <account>              # positions, P&L vs benchmark, trade log
+stockproof alerts                            # price alerts (--watch to keep checking)
+stockproof card team <call_id> --open        # share card
 ```
 
 Chinese codes can be typed in any common form: `600519`, `600519.SS`, `300750`, `920001`, `700`, `0700.HK`.
@@ -235,13 +268,17 @@ disclosure date.
   - stockproof slows down, retries, and stops with a clear message when a source refuses.
   - `tools/*_probe.py` checks which sources work from your network.
 - **LLM errors:** models can misread. Every point links to the original, so check it.
-- **Not investment advice.** The research above is part of the reason this tool doesn't give buy or sell calls.
+- **Paper is not live.** Fills assume next-open prices and a volume cap; real fills can be worse, and the gap view
+  (`stockproof paper gap`) compares paper with the backtest. HK lot sizes are assumed to be 100 shares.
+- **The forecaster is decaying.** It passed 2010–24 and failed in the locked 2024-11→2026 years. The US
+  forecaster (60 large caps, price features only) passes nothing.
+- **Not investment advice.** There is no broker connection and no automatic real-money trading.
 
 ## Development
 
 ```bash
 pip install -e ".[dev,mcp]"
-pytest              # ~180 offline tests: fake feeds, fake LLM, fake AKShare; no key or network needed
+pytest              # ~280 offline tests: fake feeds, fake LLM, fake AKShare; no key or network needed
 python tools/make_demo.py   # rebuild the demo bundle from your own stockproof_data
 ```
 
